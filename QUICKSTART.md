@@ -44,6 +44,8 @@ npm run tui
 
 ### Using the API
 
+**Note:** The API server is optional. You only need to start it if you want to interact with Worklog via REST API.
+
 ```bash
 # Terminal 1: Start the server
 npm start

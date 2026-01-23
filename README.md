@@ -19,29 +19,6 @@ npm install
 
 ## Usage
 
-### API Server
-
-Start the API server:
-
-```bash
-npm start
-```
-
-The server will run on `http://localhost:3000` by default. It automatically loads data from `worklog-data.jsonl` if it exists.
-
-#### API Endpoints
-
-- `GET /health` - Health check
-- `POST /items` - Create a work item
-- `GET /items` - List work items (with optional filters)
-- `GET /items/:id` - Get a specific work item
-- `PUT /items/:id` - Update a work item
-- `DELETE /items/:id` - Delete a work item
-- `GET /items/:id/children` - Get children of a work item
-- `GET /items/:id/descendants` - Get all descendants
-- `POST /export` - Export data to JSONL
-- `POST /import` - Import data from JSONL
-
 ### CLI
 
 The CLI tool allows you to manage work items from the command line:
@@ -74,6 +51,31 @@ npm run cli -- export -f backup.jsonl
 # Import data
 npm run cli -- import -f backup.jsonl
 ```
+
+### API Server (Optional)
+
+**Note:** You only need to start the API server if you want to interact with Worklog via REST API. The CLI and TUI work independently without requiring the API server.
+
+Start the API server:
+
+```bash
+npm start
+```
+
+The server will run on `http://localhost:3000` by default. It automatically loads data from `worklog-data.jsonl` if it exists.
+
+#### API Endpoints
+
+- `GET /health` - Health check
+- `POST /items` - Create a work item
+- `GET /items` - List work items (with optional filters)
+- `GET /items/:id` - Get a specific work item
+- `PUT /items/:id` - Update a work item
+- `DELETE /items/:id` - Delete a work item
+- `GET /items/:id/children` - Get children of a work item
+- `GET /items/:id/descendants` - Get all descendants
+- `POST /export` - Export data to JSONL
+- `POST /import` - Import data from JSONL
 
 ### TUI (Terminal User Interface)
 
