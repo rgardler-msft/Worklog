@@ -73,6 +73,7 @@ The Worklog TUI now includes full integration with OpenCode, an AI-powered codin
   - `Ctrl+S` - Send prompt
   - `Enter` - Accept autocomplete or add newline
   - `Escape` - Close dialog
+  - `Ctrl+W, k/j` - Move focus between response pane and input
 
 - **In the response pane:**
   - Arrow keys or vim keys (`j`/`k`) - Scroll through response

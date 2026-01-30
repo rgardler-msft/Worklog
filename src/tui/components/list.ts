@@ -28,6 +28,8 @@ export class ListComponent {
       scrollbar: { ch: ' ', track: { bg: 'grey' }, style: { bg: 'grey' } },
       style: {
         selected: { bg: 'blue' },
+        border: { fg: 'white' },
+        label: { fg: 'white' },
       },
       border: { type: 'line' },
       left: 0,

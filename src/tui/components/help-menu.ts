@@ -119,7 +119,10 @@ export class HelpMenuComponent {
       {
         category: 'Focus',
         items: [
-          { keys: 'Tab', description: 'Cycle focus panes' },
+          { keys: 'Ctrl+W, Ctrl+W', description: 'Cycle focus panes' },
+          { keys: 'Ctrl+W, h/l', description: 'Focus list/details' },
+          { keys: 'Ctrl+W, k/j', description: 'OpenCode response/input' },
+          { keys: 'Ctrl+W, p', description: 'Previous pane' },
         ],
       },
       {

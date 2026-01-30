@@ -272,6 +272,189 @@ export default function register(ctx: PluginContext): void {
       const opencodeSend = opencodeUi.sendButton;
       const opencodeCancel = opencodeUi.cancelButton;
 
+      const setBorderFocusStyle = (element: any, focused: boolean) => {
+        if (!element?.style) return;
+        const border = element.style.border || (element.style.border = {});
+        border.fg = focused ? 'green' : 'white';
+        const labelStyle = element.style.label || (element.style.label = {});
+        labelStyle.fg = focused ? 'green' : 'white';
+      };
+
+      const setDetailBorderFocusStyle = (focused: boolean) => {
+        setBorderFocusStyle(detail, focused);
+      };
+
+      const setListBorderFocusStyle = (focused: boolean) => {
+        setBorderFocusStyle(list, focused);
+      };
+
+      const setOpencodeBorderFocusStyle = (focused: boolean) => {
+        setBorderFocusStyle(opencodeDialog, focused);
+      };
+
+      const paneForNode = (node: any): any => {
+        if (!node) return null;
+        if (node === list) return list;
+        if (node === detail) return detail;
+        if (node === opencodeDialog || node === opencodeText) return opencodeDialog;
+        if (node === opencodePane) return opencodeDialog;
+        return null;
+      };
+      let paneFocusIndex = 0;
+      let lastPaneFocusIndex = 0;
+
+      const getFocusPanes = (): any[] => {
+        const panes = [list, detail];
+        if (!opencodeDialog.hidden) panes.push(opencodeDialog);
+        return panes;
+      };
+
+      const getActivePaneIndex = (): number => {
+        const panes = getFocusPanes();
+        const focus = paneForNode(screen.focused);
+        if (!focus) return paneFocusIndex;
+        const idx = panes.indexOf(focus);
+        return idx >= 0 ? idx : paneFocusIndex;
+      };
+
+      const syncFocusFromScreen = () => {
+        const panes = getFocusPanes();
+        const focus = paneForNode(screen.focused);
+        if (!focus) return;
+        const idx = panes.indexOf(focus);
+        if (idx >= 0) {
+          lastPaneFocusIndex = paneFocusIndex;
+          paneFocusIndex = idx;
+          applyFocusStyles();
+        }
+      };
+
+      const focusPaneByIndex = (idx: number) => {
+        const panes = getFocusPanes();
+        if (panes.length === 0) return;
+        const clamped = ((idx % panes.length) + panes.length) % panes.length;
+        lastPaneFocusIndex = paneFocusIndex;
+        paneFocusIndex = clamped;
+        const target = panes[clamped];
+        if (target === opencodeDialog) {
+          opencodeText.focus();
+        } else {
+          target.focus();
+        }
+        applyFocusStyles();
+      };
+
+      const cycleFocus = (direction: 1 | -1) => {
+        const current = getActivePaneIndex();
+        focusPaneByIndex(current + direction);
+      };
+
+      const applyFocusStyles = () => {
+        const active = getFocusPanes()[paneFocusIndex];
+        setListBorderFocusStyle(active === list);
+        setDetailBorderFocusStyle(active === detail);
+        setOpencodeBorderFocusStyle(active === opencodeDialog);
+      };
+
+      const applyFocusStylesForPane = (pane: any) => {
+        setListBorderFocusStyle(pane === list);
+        setDetailBorderFocusStyle(pane === detail);
+        setOpencodeBorderFocusStyle(pane === opencodeDialog);
+      };
+
+       let ctrlWPending = false;
+       let ctrlWTimeout: ReturnType<typeof setTimeout> | null = null;
+       let lastCtrlWTime = 0;
+       let suppressNextP = false;  // Flag to suppress 'p' handler after Ctrl-W p
+       let lastCtrlWKeyHandled = false;  // Flag to suppress widget key handling after Ctrl-W command
+       
+       const setCtrlWPending = () => {
+         console.error(`[TUI] Setting ctrlWPending = true (timestamp: ${Date.now()})`);
+         ctrlWPending = true;
+         lastCtrlWTime = Date.now();
+         if (ctrlWTimeout) clearTimeout(ctrlWTimeout);
+         ctrlWTimeout = setTimeout(() => {
+           console.error(`[TUI] Clearing ctrlWPending (timeout)`);
+           ctrlWPending = false;
+           ctrlWTimeout = null;
+         }, 2000);  // Increased to 2 seconds
+       };
+
+       const handleCtrlWCommand = (name?: string) => {
+         console.error(`[TUI] handleCtrlWCommand(name="${name}")`);
+         if (!name) return false;
+         if (helpMenu.isVisible()) return false;
+         if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return false;
+         if (name === 'w') {
+           console.error(`[TUI] Handling Ctrl-W w (cycleFocus)`);
+           cycleFocus(1);
+           screen.render();
+           return true;
+         }
+         if (name === 'p') {
+           console.error(`[TUI] Handling Ctrl-W p (previous pane)`);
+           focusPaneByIndex(lastPaneFocusIndex);
+           screen.render();
+           return true;
+         }
+          if (name === 'h') {
+            console.error(`[TUI] Handling Ctrl-W h (focus left with wrap)`);
+            const current = getActivePaneIndex();
+            focusPaneByIndex(current - 1);  // Cycle backward (wraps around)
+            screen.render();
+            return true;
+          }
+          if (name === 'l') {
+            console.error(`[TUI] Handling Ctrl-W l (focus right with wrap)`);
+            const current = getActivePaneIndex();
+            focusPaneByIndex(current + 1);  // Cycle forward (wraps around)
+            screen.render();
+            return true;
+          }
+          if (name === 'k') {
+            console.error(`[TUI] Handling Ctrl-W k (focus up/opencodePane)`);
+            if (opencodeDialog.hidden) return false;
+            if (!opencodePane || opencodePane.hidden) return false;
+            opencodePane.focus();
+            syncFocusFromScreen();
+            screen.render();
+            return true;
+          }
+          if (name === 'j') {
+            console.error(`[TUI] Handling Ctrl-W j (focus down/opencodeText)`);
+            if (opencodeDialog.hidden) return false;
+            if (!opencodePane || opencodePane.hidden) return false;
+            opencodeText.focus();
+            syncFocusFromScreen();
+            screen.render();
+            return true;
+          }
+         console.error(`[TUI] handleCtrlWCommand: unrecognized key "${name}"`);
+         return false;
+       };
+
+       const handleCtrlWPendingKey = (name?: string) => {
+         console.error(`[TUI] handleCtrlWPendingKey(name="${name}", ctrlWPending=${ctrlWPending})`);
+         if (!ctrlWPending) {
+           console.error(`[TUI] ctrlWPending is false, ignoring key`);
+           return false;
+         }
+         ctrlWPending = false;
+         return handleCtrlWCommand(name);
+       };
+
+       const attachCtrlWPendingHandler = (widget: any) => {
+         widget.on('keypress', (_ch: any, key: any) => {
+           console.error(`[TUI] Widget keypress handler fired: key.name="${key?.name}", key.ctrl=${key?.ctrl}`);
+           if (handleCtrlWPendingKey(key?.name)) {
+             console.error(`[TUI] Widget handler: handleCtrlWPendingKey returned true, consuming event`);
+             return false;
+           }
+         });
+       };
+
+
+
       // Command autocomplete support
       const AVAILABLE_COMMANDS = [
         '/help',
@@ -358,10 +541,24 @@ export default function register(ctx: PluginContext): void {
         screen.render();
       }
 
-      // Hook into textarea input to update autocomplete
-      opencodeText.on('keypress', function(this: any, _ch: any, _key: any) {
-        // Handle Ctrl+Enter for newline insertion  
-        if (_key && _key.name === 'linefeed') {
+       // Hook into textarea input to update autocomplete
+       opencodeText.on('keypress', function(this: any, _ch: any, _key: any) {
+         console.error(`[TUI] opencodeText keypress: _ch="${_ch}", key.name="${_key?.name}", key.ctrl=${_key?.ctrl}, lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
+         
+         // Suppress j/k when they were just handled as Ctrl-W commands
+         if (lastCtrlWKeyHandled && ['j', 'k'].includes(_key?.name)) {
+           console.error(`[TUI] opencodeText: Suppressing '${_key?.name}' key (Ctrl-W command) - returning false`);
+           return false;  // Consume the event
+         }
+         
+         // ALSO check if we're in the middle of a Ctrl-W sequence
+         if (ctrlWPending && ['j', 'k'].includes(_key?.name)) {
+           console.error(`[TUI] opencodeText: ctrlWPending is true and key is j/k - consuming event to prevent typing`);
+           return false;
+         }
+         
+         // Handle Ctrl+Enter for newline insertion  
+         if (_key && _key.name === 'linefeed') {
           // Get CURRENT value BEFORE the textarea adds the newline
           const currentValue = this.getValue ? this.getValue() : '';
           const currentLines = currentValue.split('\n').length;
@@ -509,6 +706,8 @@ export default function register(ctx: PluginContext): void {
         userTypedText = '';
         suggestionHint.setContent('');
         opencodeText.focus();
+        paneFocusIndex = getFocusPanes().indexOf(opencodeDialog);
+        applyFocusStyles();
         // Don't move cursor since there's no prompt anymore
         updateOpencodeInputLayout();
         
@@ -526,6 +725,8 @@ export default function register(ctx: PluginContext): void {
         // Just clear the input and keep it open
         try { if (typeof opencodeText.clearValue === 'function') opencodeText.clearValue(); } catch (_) {}
         try { if (typeof opencodeText.setValue === 'function') opencodeText.setValue(''); } catch (_) {}
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -533,6 +734,8 @@ export default function register(ctx: PluginContext): void {
         if (opencodePane) {
           opencodePane.hide();
         }
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -675,6 +878,8 @@ export default function register(ctx: PluginContext): void {
           opencodePane.hide();
         }
         list.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       });
 
@@ -688,16 +893,32 @@ export default function register(ctx: PluginContext): void {
         runOpencode(prompt);
       });
 
-      // Accept Enter to send, Ctrl+Enter for newline
-      opencodeText.key(['enter'], function(this: any) {
-        if (applyCommandSuggestion(this)) {
-          return;
-        }
-        // Send the message
-        const prompt = this.getValue ? this.getValue() : '';
-        closeOpencodeDialog();
-        runOpencode(prompt);
-      });
+       // Accept Enter to send, Ctrl+Enter for newline
+       opencodeText.key(['enter'], function(this: any) {
+         if (applyCommandSuggestion(this)) {
+           return;
+         }
+         const prompt = this.getValue ? this.getValue() : '';
+         closeOpencodeDialog();
+         runOpencode(prompt);
+       });
+
+       // Suppress j/k keys when they're part of Ctrl-W commands
+       opencodeText.key(['j'], function(this: any) {
+         console.error(`[TUI] opencodeText.key(['j']): lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
+         if (lastCtrlWKeyHandled) {
+           console.error(`[TUI] opencodeText.key: Suppressing 'j' key (Ctrl-W command) - returning false`);
+           return false;
+         }
+       });
+
+       opencodeText.key(['k'], function(this: any) {
+         console.error(`[TUI] opencodeText.key(['k']): lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
+         if (lastCtrlWKeyHandled) {
+           console.error(`[TUI] opencodeText.key: Suppressing 'k' key (Ctrl-W command) - returning false`);
+           return false;
+         }
+       });
 
 
       // Pressing Escape while the dialog (or any child) is focused should
@@ -713,6 +934,8 @@ export default function register(ctx: PluginContext): void {
         // keypress and exiting the TUI.
         suppressEscapeUntil = Date.now() + 250;
         list.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       });
 
@@ -858,6 +1081,8 @@ export default function register(ctx: PluginContext): void {
         detailOverlay.setFront();
         detailModal.setFront();
         detailModal.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         suppressDetailCloseUntil = Date.now() + 200;
         screen.render();
       }
@@ -873,6 +1098,8 @@ export default function register(ctx: PluginContext): void {
         detailModal.hide();
         detailOverlay.hide();
         list.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -889,6 +1116,8 @@ export default function register(ctx: PluginContext): void {
         closeDialog.setFront();
         closeDialogOptions.select(0);
         closeDialogOptions.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -896,6 +1125,8 @@ export default function register(ctx: PluginContext): void {
         closeDialog.hide();
         closeOverlay.hide();
         list.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -912,6 +1143,8 @@ export default function register(ctx: PluginContext): void {
         updateDialog.setFront();
         updateDialogOptions.select(0);
         updateDialogOptions.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -919,6 +1152,8 @@ export default function register(ctx: PluginContext): void {
         updateDialog.hide();
         updateOverlay.hide();
         list.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -1086,6 +1321,8 @@ export default function register(ctx: PluginContext): void {
         nextOverlay.setFront();
         nextDialog.setFront();
         nextDialogOptions.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         setNextDialogContent('Evaluating next work item...');
         runNextWorkItem();
       }
@@ -1094,6 +1331,8 @@ export default function register(ctx: PluginContext): void {
         nextDialog.hide();
         nextOverlay.hide();
         list.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
         screen.render();
       }
 
@@ -1267,11 +1506,34 @@ export default function register(ctx: PluginContext): void {
         }
       });
 
+       list.on('focus', () => {
+         paneFocusIndex = getFocusPanes().indexOf(list);
+         applyFocusStylesForPane(list);
+       });
+
+       detail.on('focus', () => {
+         paneFocusIndex = getFocusPanes().indexOf(detail);
+         applyFocusStylesForPane(detail);
+       });
+
+       opencodeDialog.on('focus', () => {
+         paneFocusIndex = getFocusPanes().indexOf(opencodeDialog);
+         applyFocusStylesForPane(opencodeDialog);
+       });
+
+       opencodeText.on('focus', () => {
+         paneFocusIndex = getFocusPanes().indexOf(opencodeDialog);
+         applyFocusStylesForPane(opencodeDialog);
+       });
+
       list.on('click', () => {
         setTimeout(() => {
           const idx = list.selected as number;
           const visible = buildVisible();
           updateDetailForIndex(idx, visible);
+          list.focus();
+          paneFocusIndex = getFocusPanes().indexOf(list);
+          applyFocusStylesForPane(list);
           screen.render();
         }, 0);
       });
@@ -1288,29 +1550,47 @@ export default function register(ctx: PluginContext): void {
       });
 
       detail.on('click', (data: any) => {
+        detail.focus();
+        paneFocusIndex = getFocusPanes().indexOf(detail);
+        applyFocusStylesForPane(detail);
         openDetailsFromClick(getRenderedLineAtClick(detail as any, data));
       });
 
       detailModal.on('click', (data: any) => {
+        detailModal.focus();
+        paneFocusIndex = getFocusPanes().indexOf(detail);
+        applyFocusStylesForPane(detail);
         openDetailsFromClick(getRenderedLineAtClick(detailModal as any, data));
       });
 
       detail.on('mouse', (data: any) => {
         if (data?.action === 'click') {
+          detail.focus();
+          paneFocusIndex = getFocusPanes().indexOf(detail);
+          applyFocusStylesForPane(detail);
           openDetailsFromClick(getRenderedLineAtClick(detail as any, data));
         }
       });
 
       detail.on('mousedown', (data: any) => {
+        detail.focus();
+        paneFocusIndex = getFocusPanes().indexOf(detail);
+        applyFocusStylesForPane(detail);
         openDetailsFromClick(getRenderedLineAtScreen(detail as any, data));
       });
 
       detail.on('mouseup', (data: any) => {
+        detail.focus();
+        paneFocusIndex = getFocusPanes().indexOf(detail);
+        applyFocusStylesForPane(detail);
         openDetailsFromClick(getRenderedLineAtScreen(detail as any, data));
       });
 
       detailModal.on('mouse', (data: any) => {
         if (data?.action === 'click') {
+          detailModal.focus();
+          paneFocusIndex = getFocusPanes().indexOf(detail);
+          applyFocusStylesForPane(detail);
           openDetailsFromClick(getRenderedLineAtClick(detailModal as any, data));
         }
       });
@@ -1426,22 +1706,84 @@ export default function register(ctx: PluginContext): void {
 
       // Focus list to receive keys
       list.focus();
+      paneFocusIndex = getFocusPanes().indexOf(list);
+      applyFocusStyles();
       screen.render();
 
       function openHelp() {
         helpMenu.show();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
       }
 
       function closeHelp() {
         helpMenu.hide();
         list.focus();
+        paneFocusIndex = getFocusPanes().indexOf(list);
+        applyFocusStyles();
       }
 
       // Toggle help
-      screen.key(['?'], () => {
-        if (!helpMenu.isVisible()) openHelp();
-        else closeHelp();
-      });
+       screen.key(['?'], () => {
+         if (!helpMenu.isVisible()) openHelp();
+         else closeHelp();
+       });
+
+       // Raw keypress handler for Ctrl-W sequences
+       // This fires BEFORE screen.key() handlers and gives us lower-level control
+       screen.on('keypress', (_ch: any, key: any) => {
+         console.error(`[TUI] Raw keypress: ch="${_ch}", key.name="${key?.name}", key.ctrl=${key?.ctrl}, key.meta=${key?.meta}`);
+         
+         // Only process hjklwp when ctrlWPending is true
+         if (ctrlWPending && ['h', 'j', 'k', 'l', 'w', 'p'].includes(key?.name)) {
+           console.error(`[TUI] Raw handler: ctrlWPending is true and key is hjklwp, handling Ctrl-W command`);
+           if (handleCtrlWCommand(key?.name)) {
+             console.error(`[TUI] Raw handler: command handled, returning true to suppress further processing`);
+             ctrlWPending = false;
+             if (ctrlWTimeout) {
+               clearTimeout(ctrlWTimeout);
+               ctrlWTimeout = null;
+             }
+             // Set flag to suppress widget-level key handling
+             lastCtrlWKeyHandled = true;
+             setTimeout(() => { lastCtrlWKeyHandled = false; }, 100);
+             
+             // Set suppressNextP if we just handled Ctrl-W p
+             if (key?.name === 'p') {
+               suppressNextP = true;
+               setTimeout(() => { suppressNextP = false; }, 100);
+             }
+             return false;  // Consume the event
+           }
+         }
+       });
+
+       // Vim-style window navigation with Ctrl-W sequence
+       screen.key(['C-w'], (_ch: any, key: any) => {
+         console.error(`[TUI] *** Screen handler for Ctrl-W fired (key.ctrl=${key?.ctrl}) ***`);
+         if (helpMenu.isVisible()) return;
+         if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return;
+         console.error(`[TUI] Setting ctrlWPending and waiting for follow-up key`);
+         setCtrlWPending();
+       });
+
+       screen.key(['h', 'j', 'k', 'l', 'w', 'p'], (_ch: any, key: any) => {
+         console.error(`[TUI] *** Screen handler for hjklwp fired, key.name="${key?.name}", key.ctrl=${key?.ctrl}, ctrlWPending=${ctrlWPending} ***`);
+         
+         // Skip this handler if it's a Ctrl- modifier key (those go to Ctrl-W handler)
+         if (key?.ctrl) {
+           console.error(`[TUI] Skipping: key has ctrl modifier, letting Ctrl- handler deal with it`);
+           return;
+         }
+         
+         if (helpMenu.isVisible()) return;
+         if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return;
+         
+         const result = handleCtrlWPendingKey(key?.name);
+         console.error(`[TUI] handleCtrlWPendingKey returned ${result}`);
+         return result;
+       });
+
 
       // Open opencode prompt dialog (shortcut O)
       screen.key(['o', 'O'], async () => {
@@ -1455,10 +1797,14 @@ export default function register(ctx: PluginContext): void {
         copySelectedId();
       });
 
-      // Open parent preview
-      screen.key(['p', 'P'], () => {
-        openParentPreview();
-      });
+       // Open parent preview
+       screen.key(['p', 'P'], () => {
+         if (suppressNextP) {
+           console.error(`[TUI] Suppressing 'p' handler (just handled Ctrl-W p)`);
+           return;
+         }
+         openParentPreview();
+       });
 
       // Close selected item
       screen.key(['x', 'X'], () => {

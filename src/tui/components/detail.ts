@@ -30,7 +30,7 @@ export class DetailComponent {
       mouse: true,
       clickable: true,
       border: { type: 'line' },
-      style: { focus: { border: { fg: 'green' } } },
+      style: { focus: { border: { fg: 'green' } }, border: { fg: 'white' }, label: { fg: 'white' } },
       content: '',
     });
 

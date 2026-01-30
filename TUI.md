@@ -19,6 +19,10 @@ This document describes the interactive terminal UI shipped as the `wl tui` (or 
 - Space — toggle expand/collapse
 - Mouse — click to select and scroll
 - q / Esc / Ctrl-C — quit
+- Ctrl+W, Ctrl+W — cycle focus between list, details, and OpenCode
+- Ctrl+W, h / l — focus list or details
+- Ctrl+W, k / j — move focus between OpenCode response and input
+- Ctrl+W, p — focus previous pane
 
 ### Work Item Actions
 

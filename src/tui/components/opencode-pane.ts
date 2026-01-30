@@ -49,7 +49,7 @@ export class OpencodePaneComponent {
       tags: true,
       mouse: true,
       clickable: true,
-      style: { border: { fg: 'yellow' } },
+      style: { border: { fg: 'white' }, label: { fg: 'white' } },
     });
 
     // Use a textarea so multi-line input works and Enter inserts newlines
