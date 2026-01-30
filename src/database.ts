@@ -82,22 +82,22 @@ export class WorklogDatabase {
     const itemCount = this.store.countWorkItems();
     const shouldRefresh = itemCount === 0 || !lastImportMtime || jsonlMtime > lastImportMtime;
 
-    if (shouldRefresh) {
-      if (!this.silent) {
-        // Debug: send to stderr so JSON stdout is preserved for --json mode
-        console.error(`Refreshing database from ${this.jsonlPath}...`);
-      }
-      const { items: jsonlItems, comments: jsonlComments } = importFromJsonl(this.jsonlPath);
-      this.store.importData(jsonlItems, jsonlComments);
-      
-      // Update metadata
-      this.store.setMetadata('lastJsonlImportMtime', jsonlMtime.toString());
-      this.store.setMetadata('lastJsonlImportAt', new Date().toISOString());
-      
-      if (!this.silent) {
-        console.error(`Loaded ${jsonlItems.length} work items and ${jsonlComments.length} comments from JSONL`);
-      }
-    }
+     if (shouldRefresh) {
+       if (!this.silent) {
+         // Debug: send to stderr so JSON stdout is preserved for --json mode
+         this.debug(`Refreshing database from ${this.jsonlPath}...`);
+       }
+       const { items: jsonlItems, comments: jsonlComments } = importFromJsonl(this.jsonlPath);
+       this.store.importData(jsonlItems, jsonlComments);
+       
+       // Update metadata
+       this.store.setMetadata('lastJsonlImportMtime', jsonlMtime.toString());
+       this.store.setMetadata('lastJsonlImportAt', new Date().toISOString());
+       
+       if (!this.silent) {
+         this.debug(`Loaded ${jsonlItems.length} work items and ${jsonlComments.length} comments from JSONL`);
+       }
+     }
   }
 
   /**
@@ -108,13 +108,13 @@ export class WorklogDatabase {
       return;
     }
     
-    const items = this.store.getAllWorkItems();
-    const comments = this.store.getAllComments();
-    if (!this.silent) {
-      // Debug: use stderr for diagnostic logs
-      console.error(`WorklogDatabase.exportToJsonl: exporting ${items.length} items and ${comments.length} comments to ${this.jsonlPath}`);
-    }
-    exportToJsonl(items, comments, this.jsonlPath);
+     const items = this.store.getAllWorkItems();
+     const comments = this.store.getAllComments();
+     if (!this.silent) {
+       // Debug: use stderr for diagnostic logs
+       this.debug(`WorklogDatabase.exportToJsonl: exporting ${items.length} items and ${comments.length} comments to ${this.jsonlPath}`);
+     }
+     exportToJsonl(items, comments, this.jsonlPath);
   }
 
   private debug(message: string): void {
@@ -998,15 +998,15 @@ export class WorklogDatabase {
     };
 
     // Debug: log creation intent before saving (only when not silent)
-    if (!this.silent) {
-      // Send to stderr so JSON output on stdout is not contaminated
-      console.error(`WorklogDatabase.createComment: creating comment for ${input.workItemId} by ${input.author}`);
-    }
+     if (!this.silent) {
+       // Send to stderr so JSON output on stdout is not contaminated
+       this.debug(`WorklogDatabase.createComment: creating comment for ${input.workItemId} by ${input.author}`);
+     }
 
-    this.store.saveComment(comment);
-    this.exportToJsonl();
-    this.triggerAutoSync();
-    return comment;
+     this.store.saveComment(comment);
+     this.exportToJsonl();
+     this.triggerAutoSync();
+     return comment;
   }
 
   /**

@@ -368,90 +368,90 @@ export default function register(ctx: PluginContext): void {
        let suppressNextP = false;  // Flag to suppress 'p' handler after Ctrl-W p
        let lastCtrlWKeyHandled = false;  // Flag to suppress widget key handling after Ctrl-W command
        
-       const setCtrlWPending = () => {
-         console.error(`[TUI] Setting ctrlWPending = true (timestamp: ${Date.now()})`);
-         ctrlWPending = true;
-         lastCtrlWTime = Date.now();
-         if (ctrlWTimeout) clearTimeout(ctrlWTimeout);
-         ctrlWTimeout = setTimeout(() => {
-           console.error(`[TUI] Clearing ctrlWPending (timeout)`);
-           ctrlWPending = false;
-           ctrlWTimeout = null;
-         }, 2000);  // Increased to 2 seconds
-       };
+        const setCtrlWPending = () => {
+          debugLog(`Setting ctrlWPending = true (timestamp: ${Date.now()})`);
+          ctrlWPending = true;
+          lastCtrlWTime = Date.now();
+          if (ctrlWTimeout) clearTimeout(ctrlWTimeout);
+          ctrlWTimeout = setTimeout(() => {
+            debugLog(`Clearing ctrlWPending (timeout)`);
+            ctrlWPending = false;
+            ctrlWTimeout = null;
+          }, 2000);  // Increased to 2 seconds
+        };
 
-       const handleCtrlWCommand = (name?: string) => {
-         console.error(`[TUI] handleCtrlWCommand(name="${name}")`);
-         if (!name) return false;
-         if (helpMenu.isVisible()) return false;
-         if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return false;
-         if (name === 'w') {
-           console.error(`[TUI] Handling Ctrl-W w (cycleFocus)`);
-           cycleFocus(1);
-           screen.render();
-           return true;
-         }
-         if (name === 'p') {
-           console.error(`[TUI] Handling Ctrl-W p (previous pane)`);
-           focusPaneByIndex(lastPaneFocusIndex);
-           screen.render();
-           return true;
-         }
-          if (name === 'h') {
-            console.error(`[TUI] Handling Ctrl-W h (focus left with wrap)`);
-            const current = getActivePaneIndex();
-            focusPaneByIndex(current - 1);  // Cycle backward (wraps around)
+        const handleCtrlWCommand = (name?: string) => {
+          debugLog(`handleCtrlWCommand(name="${name}")`);
+          if (!name) return false;
+          if (helpMenu.isVisible()) return false;
+          if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return false;
+          if (name === 'w') {
+            debugLog(`Handling Ctrl-W w (cycleFocus)`);
+            cycleFocus(1);
             screen.render();
             return true;
           }
-          if (name === 'l') {
-            console.error(`[TUI] Handling Ctrl-W l (focus right with wrap)`);
-            const current = getActivePaneIndex();
-            focusPaneByIndex(current + 1);  // Cycle forward (wraps around)
+          if (name === 'p') {
+            debugLog(`Handling Ctrl-W p (previous pane)`);
+            focusPaneByIndex(lastPaneFocusIndex);
             screen.render();
             return true;
           }
-          if (name === 'k') {
-            console.error(`[TUI] Handling Ctrl-W k (focus up/opencodePane)`);
-            if (opencodeDialog.hidden) return false;
-            if (!opencodePane || opencodePane.hidden) return false;
-            opencodePane.focus();
-            syncFocusFromScreen();
-            screen.render();
-            return true;
-          }
-          if (name === 'j') {
-            console.error(`[TUI] Handling Ctrl-W j (focus down/opencodeText)`);
-            if (opencodeDialog.hidden) return false;
-            if (!opencodePane || opencodePane.hidden) return false;
-            opencodeText.focus();
-            syncFocusFromScreen();
-            screen.render();
-            return true;
-          }
-         console.error(`[TUI] handleCtrlWCommand: unrecognized key "${name}"`);
-         return false;
-       };
-
-       const handleCtrlWPendingKey = (name?: string) => {
-         console.error(`[TUI] handleCtrlWPendingKey(name="${name}", ctrlWPending=${ctrlWPending})`);
-         if (!ctrlWPending) {
-           console.error(`[TUI] ctrlWPending is false, ignoring key`);
-           return false;
-         }
-         ctrlWPending = false;
-         return handleCtrlWCommand(name);
-       };
-
-       const attachCtrlWPendingHandler = (widget: any) => {
-         widget.on('keypress', (_ch: any, key: any) => {
-           console.error(`[TUI] Widget keypress handler fired: key.name="${key?.name}", key.ctrl=${key?.ctrl}`);
-           if (handleCtrlWPendingKey(key?.name)) {
-             console.error(`[TUI] Widget handler: handleCtrlWPendingKey returned true, consuming event`);
-             return false;
+           if (name === 'h') {
+             debugLog(`Handling Ctrl-W h (focus left with wrap)`);
+             const current = getActivePaneIndex();
+             focusPaneByIndex(current - 1);  // Cycle backward (wraps around)
+             screen.render();
+             return true;
            }
-         });
-       };
+           if (name === 'l') {
+             debugLog(`Handling Ctrl-W l (focus right with wrap)`);
+             const current = getActivePaneIndex();
+             focusPaneByIndex(current + 1);  // Cycle forward (wraps around)
+             screen.render();
+             return true;
+           }
+           if (name === 'k') {
+             debugLog(`Handling Ctrl-W k (focus up/opencodePane)`);
+             if (opencodeDialog.hidden) return false;
+             if (!opencodePane || opencodePane.hidden) return false;
+             opencodePane.focus();
+             syncFocusFromScreen();
+             screen.render();
+             return true;
+           }
+           if (name === 'j') {
+             debugLog(`Handling Ctrl-W j (focus down/opencodeText)`);
+             if (opencodeDialog.hidden) return false;
+             if (!opencodePane || opencodePane.hidden) return false;
+             opencodeText.focus();
+             syncFocusFromScreen();
+             screen.render();
+             return true;
+           }
+          debugLog(`handleCtrlWCommand: unrecognized key "${name}"`);
+          return false;
+        };
+
+        const handleCtrlWPendingKey = (name?: string) => {
+          debugLog(`handleCtrlWPendingKey(name="${name}", ctrlWPending=${ctrlWPending})`);
+          if (!ctrlWPending) {
+            debugLog(`ctrlWPending is false, ignoring key`);
+            return false;
+          }
+          ctrlWPending = false;
+          return handleCtrlWCommand(name);
+        };
+
+        const attachCtrlWPendingHandler = (widget: any) => {
+          widget.on('keypress', (_ch: any, key: any) => {
+            debugLog(`Widget keypress handler fired: key.name="${key?.name}", key.ctrl=${key?.ctrl}`);
+            if (handleCtrlWPendingKey(key?.name)) {
+              debugLog(`Widget handler: handleCtrlWPendingKey returned true, consuming event`);
+              return false;
+            }
+          });
+        };
 
 
 
@@ -541,21 +541,21 @@ export default function register(ctx: PluginContext): void {
         screen.render();
       }
 
-       // Hook into textarea input to update autocomplete
-       opencodeText.on('keypress', function(this: any, _ch: any, _key: any) {
-         console.error(`[TUI] opencodeText keypress: _ch="${_ch}", key.name="${_key?.name}", key.ctrl=${_key?.ctrl}, lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
-         
-         // Suppress j/k when they were just handled as Ctrl-W commands
-         if (lastCtrlWKeyHandled && ['j', 'k'].includes(_key?.name)) {
-           console.error(`[TUI] opencodeText: Suppressing '${_key?.name}' key (Ctrl-W command) - returning false`);
-           return false;  // Consume the event
-         }
-         
-         // ALSO check if we're in the middle of a Ctrl-W sequence
-         if (ctrlWPending && ['j', 'k'].includes(_key?.name)) {
-           console.error(`[TUI] opencodeText: ctrlWPending is true and key is j/k - consuming event to prevent typing`);
-           return false;
-         }
+        // Hook into textarea input to update autocomplete
+        opencodeText.on('keypress', function(this: any, _ch: any, _key: any) {
+          debugLog(`opencodeText keypress: _ch="${_ch}", key.name="${_key?.name}", key.ctrl=${_key?.ctrl}, lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
+          
+          // Suppress j/k when they were just handled as Ctrl-W commands
+          if (lastCtrlWKeyHandled && ['j', 'k'].includes(_key?.name)) {
+            debugLog(`opencodeText: Suppressing '${_key?.name}' key (Ctrl-W command) - returning false`);
+            return false;  // Consume the event
+          }
+          
+          // ALSO check if we're in the middle of a Ctrl-W sequence
+          if (ctrlWPending && ['j', 'k'].includes(_key?.name)) {
+            debugLog(`opencodeText: ctrlWPending is true and key is j/k - consuming event to prevent typing`);
+            return false;
+          }
          
          // Handle Ctrl+Enter for newline insertion  
          if (_key && _key.name === 'linefeed') {
@@ -903,22 +903,22 @@ export default function register(ctx: PluginContext): void {
          runOpencode(prompt);
        });
 
-       // Suppress j/k keys when they're part of Ctrl-W commands
-       opencodeText.key(['j'], function(this: any) {
-         console.error(`[TUI] opencodeText.key(['j']): lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
-         if (lastCtrlWKeyHandled) {
-           console.error(`[TUI] opencodeText.key: Suppressing 'j' key (Ctrl-W command) - returning false`);
-           return false;
-         }
-       });
+        // Suppress j/k keys when they're part of Ctrl-W commands
+        opencodeText.key(['j'], function(this: any) {
+          debugLog(`opencodeText.key(['j']): lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
+          if (lastCtrlWKeyHandled) {
+            debugLog(`opencodeText.key: Suppressing 'j' key (Ctrl-W command) - returning false`);
+            return false;
+          }
+        });
 
-       opencodeText.key(['k'], function(this: any) {
-         console.error(`[TUI] opencodeText.key(['k']): lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
-         if (lastCtrlWKeyHandled) {
-           console.error(`[TUI] opencodeText.key: Suppressing 'k' key (Ctrl-W command) - returning false`);
-           return false;
-         }
-       });
+        opencodeText.key(['k'], function(this: any) {
+          debugLog(`opencodeText.key(['k']): lastCtrlWKeyHandled=${lastCtrlWKeyHandled}`);
+          if (lastCtrlWKeyHandled) {
+            debugLog(`opencodeText.key: Suppressing 'k' key (Ctrl-W command) - returning false`);
+            return false;
+          }
+        });
 
 
       // Pressing Escape while the dialog (or any child) is focused should
@@ -1729,60 +1729,60 @@ export default function register(ctx: PluginContext): void {
          else closeHelp();
        });
 
-       // Raw keypress handler for Ctrl-W sequences
-       // This fires BEFORE screen.key() handlers and gives us lower-level control
-       screen.on('keypress', (_ch: any, key: any) => {
-         console.error(`[TUI] Raw keypress: ch="${_ch}", key.name="${key?.name}", key.ctrl=${key?.ctrl}, key.meta=${key?.meta}`);
-         
-         // Only process hjklwp when ctrlWPending is true
-         if (ctrlWPending && ['h', 'j', 'k', 'l', 'w', 'p'].includes(key?.name)) {
-           console.error(`[TUI] Raw handler: ctrlWPending is true and key is hjklwp, handling Ctrl-W command`);
-           if (handleCtrlWCommand(key?.name)) {
-             console.error(`[TUI] Raw handler: command handled, returning true to suppress further processing`);
-             ctrlWPending = false;
-             if (ctrlWTimeout) {
-               clearTimeout(ctrlWTimeout);
-               ctrlWTimeout = null;
-             }
-             // Set flag to suppress widget-level key handling
-             lastCtrlWKeyHandled = true;
-             setTimeout(() => { lastCtrlWKeyHandled = false; }, 100);
-             
-             // Set suppressNextP if we just handled Ctrl-W p
-             if (key?.name === 'p') {
-               suppressNextP = true;
-               setTimeout(() => { suppressNextP = false; }, 100);
-             }
-             return false;  // Consume the event
-           }
-         }
-       });
+        // Raw keypress handler for Ctrl-W sequences
+        // This fires BEFORE screen.key() handlers and gives us lower-level control
+        screen.on('keypress', (_ch: any, key: any) => {
+          debugLog(`Raw keypress: ch="${_ch}", key.name="${key?.name}", key.ctrl=${key?.ctrl}, key.meta=${key?.meta}`);
+          
+          // Only process hjklwp when ctrlWPending is true
+          if (ctrlWPending && ['h', 'j', 'k', 'l', 'w', 'p'].includes(key?.name)) {
+            debugLog(`Raw handler: ctrlWPending is true and key is hjklwp, handling Ctrl-W command`);
+            if (handleCtrlWCommand(key?.name)) {
+              debugLog(`Raw handler: command handled, returning true to suppress further processing`);
+              ctrlWPending = false;
+              if (ctrlWTimeout) {
+                clearTimeout(ctrlWTimeout);
+                ctrlWTimeout = null;
+              }
+              // Set flag to suppress widget-level key handling
+              lastCtrlWKeyHandled = true;
+              setTimeout(() => { lastCtrlWKeyHandled = false; }, 100);
+              
+              // Set suppressNextP if we just handled Ctrl-W p
+              if (key?.name === 'p') {
+                suppressNextP = true;
+                setTimeout(() => { suppressNextP = false; }, 100);
+              }
+              return false;  // Consume the event
+            }
+          }
+        });
 
-       // Vim-style window navigation with Ctrl-W sequence
-       screen.key(['C-w'], (_ch: any, key: any) => {
-         console.error(`[TUI] *** Screen handler for Ctrl-W fired (key.ctrl=${key?.ctrl}) ***`);
-         if (helpMenu.isVisible()) return;
-         if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return;
-         console.error(`[TUI] Setting ctrlWPending and waiting for follow-up key`);
-         setCtrlWPending();
-       });
+        // Vim-style window navigation with Ctrl-W sequence
+        screen.key(['C-w'], (_ch: any, key: any) => {
+          debugLog(`Screen handler for Ctrl-W fired (key.ctrl=${key?.ctrl})`);
+          if (helpMenu.isVisible()) return;
+          if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return;
+          debugLog(`Setting ctrlWPending and waiting for follow-up key`);
+          setCtrlWPending();
+        });
 
-       screen.key(['h', 'j', 'k', 'l', 'w', 'p'], (_ch: any, key: any) => {
-         console.error(`[TUI] *** Screen handler for hjklwp fired, key.name="${key?.name}", key.ctrl=${key?.ctrl}, ctrlWPending=${ctrlWPending} ***`);
-         
-         // Skip this handler if it's a Ctrl- modifier key (those go to Ctrl-W handler)
-         if (key?.ctrl) {
-           console.error(`[TUI] Skipping: key has ctrl modifier, letting Ctrl- handler deal with it`);
-           return;
-         }
-         
-         if (helpMenu.isVisible()) return;
-         if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return;
-         
-         const result = handleCtrlWPendingKey(key?.name);
-         console.error(`[TUI] handleCtrlWPendingKey returned ${result}`);
-         return result;
-       });
+        screen.key(['h', 'j', 'k', 'l', 'w', 'p'], (_ch: any, key: any) => {
+          debugLog(`Screen handler for hjklwp fired, key.name="${key?.name}", key.ctrl=${key?.ctrl}, ctrlWPending=${ctrlWPending}`);
+          
+          // Skip this handler if it's a Ctrl- modifier key (those go to Ctrl-W handler)
+          if (key?.ctrl) {
+            debugLog(`Skipping: key has ctrl modifier, letting Ctrl- handler deal with it`);
+            return;
+          }
+          
+          if (helpMenu.isVisible()) return;
+          if (!detailModal.hidden || !nextDialog.hidden || !closeDialog.hidden || !updateDialog.hidden) return;
+          
+          const result = handleCtrlWPendingKey(key?.name);
+          debugLog(`handleCtrlWPendingKey returned ${result}`);
+          return result;
+        });
 
 
       // Open opencode prompt dialog (shortcut O)
@@ -1797,14 +1797,14 @@ export default function register(ctx: PluginContext): void {
         copySelectedId();
       });
 
-       // Open parent preview
-       screen.key(['p', 'P'], () => {
-         if (suppressNextP) {
-           console.error(`[TUI] Suppressing 'p' handler (just handled Ctrl-W p)`);
-           return;
-         }
-         openParentPreview();
-       });
+        // Open parent preview
+        screen.key(['p', 'P'], () => {
+          if (suppressNextP) {
+            debugLog(`Suppressing 'p' handler (just handled Ctrl-W p)`);
+            return;
+          }
+          openParentPreview();
+        });
 
       // Close selected item
       screen.key(['x', 'X'], () => {

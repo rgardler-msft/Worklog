@@ -7,6 +7,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import type { PluginContext, PluginInfo, PluginLoaderOptions, PluginModule } from './plugin-types.js';
 import { resolveWorklogDir } from './worklog-paths.js';
+import { Logger } from './logger.js';
 
 /**
  * Get the default plugin directory path
@@ -72,11 +73,10 @@ export async function loadPlugin(
   verbose: boolean = false
 ): Promise<PluginInfo> {
   const name = path.basename(pluginPath);
+  const logger = new Logger({ verbose, jsonMode: false });
   
   try {
-    if (verbose) {
-      console.log(`Loading plugin: ${name}`);
-    }
+    logger.debug(`Loading plugin: ${name}`);
     
     // Convert file path to file URL for ESM import
     const fileUrl = pathToFileURL(pluginPath).href;
@@ -92,9 +92,7 @@ export async function loadPlugin(
     // Call the register function
     await module.default(ctx);
     
-    if (verbose) {
-      console.log(`✓ Loaded plugin: ${name}`);
-    }
+    logger.debug(`✓ Loaded plugin: ${name}`);
     
     return {
       name,
@@ -126,25 +124,20 @@ export async function loadPlugins(
   options?: PluginLoaderOptions
 ): Promise<PluginInfo[]> {
   const verbose = options?.verbose || false;
+  const logger = new Logger({ verbose, jsonMode: false });
   const pluginDir = resolvePluginDir(options);
   
-  if (verbose) {
-    console.log(`Plugin directory: ${pluginDir}`);
-  }
+  logger.debug(`Plugin directory: ${pluginDir}`);
   
   // Discover plugin files
   const pluginPaths = discoverPlugins(pluginDir);
   
   if (pluginPaths.length === 0) {
-    if (verbose) {
-      console.log('No plugins found');
-    }
+    logger.debug('No plugins found');
     return [];
   }
   
-  if (verbose) {
-    console.log(`Found ${pluginPaths.length} plugin(s)`);
-  }
+  logger.debug(`Found ${pluginPaths.length} plugin(s)`);
   
   // Load plugins sequentially to maintain deterministic order
   const results: PluginInfo[] = [];
