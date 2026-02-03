@@ -9,17 +9,17 @@ validation helpers and UI wiring.
 - Statuses (canonical): open, in-progress, blocked, completed, deleted
   - Source: src/tui/status-stage-rules.ts
   - Type: src/types.ts
-- Stages (canonical): (blank), idea, prd_complete, plan_complete, in_progress, in_review, done
-  - Source: src/tui/status-stage-rules.ts
+- Stages (canonical): (blank), idea, prd_complete, plan_complete, intake_complete, in_progress, in_review, done
+  - Source: templates/AGENTS.md, templates/WORKFLOW.md, src/tui/status-stage-rules.ts
   - Defaulting behavior on create/import: blank stage
     - Source: src/database.ts (create) and src/jsonl.ts (import default)
 
 ## Compatibility Rules (Explicit)
 ### Status -> Allowed Stages
 Defined in src/tui/status-stage-rules.ts.
-- open -> '', idea, prd_complete, plan_complete, in_progress
+- open -> '', idea, prd_complete, plan_complete, intake_complete, in_progress
 - in-progress -> in_progress
-- blocked -> '', idea, prd_complete, plan_complete, in_progress
+- blocked -> '', idea, prd_complete, plan_complete, intake_complete, in_progress
 - completed -> in_review, done
 - deleted -> ''
 
@@ -29,6 +29,7 @@ Derived in src/tui/status-stage-rules.ts from status compatibility.
 - idea -> open, blocked
 - prd_complete -> open, blocked
 - plan_complete -> open, blocked
+- intake_complete -> open, blocked
 - in_progress -> open, in-progress, blocked
 - in_review -> completed
 - done -> completed
