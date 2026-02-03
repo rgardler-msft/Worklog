@@ -173,10 +173,20 @@ export class WorklogDatabase {
     }
 
     const order: WorkItem[] = [];
+    const sortSiblings = (list: WorkItem[]): WorkItem[] => {
+      return list.slice().sort((a, b) => {
+        if (a.sortIndex !== b.sortIndex) {
+          return a.sortIndex - b.sortIndex;
+        }
+        const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        if (createdDiff !== 0) return createdDiff;
+        return a.id.localeCompare(b.id);
+      });
+    };
 
     const traverse = (parentId: string | null) => {
       const children = childrenByParent.get(parentId) || [];
-    const sorted = this.orderBySortIndex(children);
+      const sorted = sortSiblings(children);
       for (const child of sorted) {
         order.push(child);
         traverse(child.id);
