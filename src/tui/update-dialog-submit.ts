@@ -1,3 +1,6 @@
+import type { StatusStageValidationRules } from './status-stage-validation.js';
+import { isStatusStageCompatible } from './status-stage-validation.js';
+
 export interface UpdateDialogItemState {
   status?: string;
   stage?: string;
@@ -28,10 +31,7 @@ export function buildUpdateDialogUpdates(
     stages: string[];
     priorities: string[];
   },
-  rules?: {
-    statusStage: Record<string, readonly string[]>;
-    stageStatus: Record<string, readonly string[]>;
-  }
+  rules?: StatusStageValidationRules
 ): UpdateDialogUpdatesResult {
   const updates: Record<string, string> = {};
 
@@ -39,18 +39,8 @@ export function buildUpdateDialogUpdates(
   const nextStage = resolveSelection(values.stages, selections.stageIndex);
   const nextPriority = resolveSelection(values.priorities, selections.priorityIndex);
 
-  const statusStageRules = rules?.statusStage ?? {};
-  const stageStatusRules = rules?.stageStatus ?? {};
-
-  if (nextStatus && nextStage) {
-    const allowedStages = statusStageRules[nextStatus];
-    const allowedStatuses = stageStatusRules[nextStage];
-    if (allowedStages && !allowedStages.includes(nextStage)) {
-      return { updates: {}, hasChanges: false };
-    }
-    if (allowedStatuses && !allowedStatuses.includes(nextStatus)) {
-      return { updates: {}, hasChanges: false };
-    }
+  if (!isStatusStageCompatible(nextStatus, nextStage, rules)) {
+    return { updates: {}, hasChanges: false };
   }
 
   if (nextStatus && nextStatus !== item.status) updates.status = nextStatus;

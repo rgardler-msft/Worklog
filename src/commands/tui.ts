@@ -25,11 +25,16 @@ import {
 import { createUpdateDialogFocusManager } from '../tui/update-dialog-navigation.js';
 import { buildUpdateDialogUpdates } from '../tui/update-dialog-submit.js';
 import {
+  getAllowedStagesForStatus,
+  getAllowedStatusesForStage,
+} from '../tui/status-stage-validation.js';
+import {
   STATUS_STAGE_COMPATIBILITY,
   STAGE_STATUS_COMPATIBILITY,
   WORK_ITEM_STATUSES,
   WORK_ITEM_STAGES,
 } from '../tui/status-stage-rules.js';
+import { isStatusStageCompatible } from '../tui/status-stage-validation.js';
 
 type Item = any;
 
@@ -297,8 +302,14 @@ export default function register(ctx: PluginContext): void {
         const priorityValue = getListItemValue(updateDialogPriorityOptions, updateDialogPriorityValues[2]);
 
         const normalizedStageValue = normalizeStageValue(stageValue) ?? '';
-        const allowedStages = STATUS_STAGE_COMPATIBILITY[statusValue as WorkItemStatus] || [];
-        const allowedStatuses = STAGE_STATUS_COMPATIBILITY[normalizedStageValue] || [];
+        const allowedStages = getAllowedStagesForStatus(statusValue, {
+          statusStage: STATUS_STAGE_COMPATIBILITY,
+          stageStatus: STAGE_STATUS_COMPATIBILITY,
+        });
+        const allowedStatuses = getAllowedStatusesForStage(normalizedStageValue, {
+          statusStage: STATUS_STAGE_COMPATIBILITY,
+          stageStatus: STAGE_STATUS_COMPATIBILITY,
+        });
 
         if (!updateDialogLastChanged) {
           if (item) {
@@ -1521,6 +1532,14 @@ export default function register(ctx: PluginContext): void {
           const updates = stage === 'deleted'
             ? { status: 'deleted' as const, stage: '' }
             : { status: 'completed' as const, stage };
+          const compatible = isStatusStageCompatible(updates.status, updates.stage, {
+            statusStage: STATUS_STAGE_COMPATIBILITY,
+            stageStatus: STAGE_STATUS_COMPATIBILITY,
+          });
+          if (!compatible) {
+            showToast('Close blocked');
+            return;
+          }
           const updated = db.update(item.id, updates);
           if (!updated) {
             showToast('Close failed');
