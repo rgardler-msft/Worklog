@@ -98,7 +98,7 @@ export interface SyncDebugOptions {
   gitBranch?: string;
 }
 
-export interface CommentCreateOptions { author: string; comment: string; references?: string; prefix?: string }
+export interface CommentCreateOptions { author: string; comment?: string; body?: string; references?: string; prefix?: string }
 export interface CommentListOptions { prefix?: string }
 export interface CommentShowOptions { prefix?: string }
 export interface CommentUpdateOptions { author?: string; comment?: string; references?: string; prefix?: string }
@@ -109,4 +109,8 @@ export interface CloseOptions { reason?: string; author?: string; prefix?: strin
 
 export interface DeleteOptions { prefix?: string }
 
-export interface DepOptions { prefix?: string }
+export interface DepOptions {
+  prefix?: string;
+  incoming?: boolean;
+  outgoing?: boolean;
+}

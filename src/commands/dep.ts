@@ -123,11 +123,23 @@ export default function register(ctx: PluginContext): void {
     .command('list <itemId>')
     .description('List inbound and outbound dependency edges for a work item')
     .option('--prefix <prefix>', 'Override the default prefix')
+    .option('--outgoing', 'Only show outbound dependencies')
+    .option('--incoming', 'Only show inbound dependencies')
     .action((itemId: string, options: DepOptions) => {
       utils.requireInitialized();
       const db = utils.getDatabase(options.prefix);
       const normalizedItemId = utils.normalizeCliId(itemId, options.prefix) || itemId;
       const itemIdLookup = normalizedItemId.toUpperCase();
+
+      if (options.incoming && options.outgoing) {
+        const message = 'Cannot use --incoming and --outgoing together.';
+        if (utils.isJsonMode()) {
+          output.error(message, { success: false, error: message });
+        } else {
+          console.error(`Error: ${message}`);
+        }
+        process.exit(1);
+      }
 
       const warnings: string[] = [];
       const item = db.get(itemIdLookup);
@@ -142,8 +154,8 @@ export default function register(ctx: PluginContext): void {
         return;
       }
 
-      const outboundEdges = db.listDependencyEdgesFrom(itemIdLookup);
-      const inboundEdges = db.listDependencyEdgesTo(itemIdLookup);
+      const outboundEdges = options.incoming ? [] : db.listDependencyEdgesFrom(itemIdLookup);
+      const inboundEdges = options.outgoing ? [] : db.listDependencyEdgesTo(itemIdLookup);
 
       const outbound = outboundEdges.map(edge => {
         const dep = db.get(edge.toId);
@@ -174,9 +186,13 @@ export default function register(ctx: PluginContext): void {
 
       console.log(`Dependencies for ${item?.title || itemIdLookup} ${chalk.gray(`(${itemIdLookup})`)}`);
       console.log('');
-      console.log('Depends on:');
+      if (!options.incoming) {
+        console.log('Depends on:');
+      }
       if (outbound.length === 0) {
-        console.log('  (none)');
+        if (!options.incoming) {
+          console.log('  (none)');
+        }
       } else {
         outbound.forEach(dep => {
           const titleText = dep.status === 'completed'
@@ -185,10 +201,16 @@ export default function register(ctx: PluginContext): void {
           console.log(`  - ${titleText} ${chalk.gray(`(${dep.id})`)} Status: ${dep.status} Priority: ${dep.priority} Direction: ${dep.direction}`);
         });
       }
-      console.log('');
-      console.log('Depended on by:');
+      if (!options.incoming && !options.outgoing) {
+        console.log('');
+      }
+      if (!options.outgoing) {
+        console.log('Depended on by:');
+      }
       if (inbound.length === 0) {
-        console.log('  (none)');
+        if (!options.outgoing) {
+          console.log('  (none)');
+        }
       } else {
         inbound.forEach(dep => {
           console.log(`  - ${dep.title} ${chalk.gray(`(${dep.id})`)} Status: ${dep.status} Priority: ${dep.priority} Direction: ${dep.direction}`);

@@ -113,19 +113,25 @@ export class OpencodeClient {
         detached: false,
       });
 
-      if (this.opencodeServerProc.stdout) {
-        this.opencodeServerProc.stdout.on('data', (chunk) => {
-          this.options.log(`server stdout: ${chunk.toString().trim()}`);
-        });
+      // Attach listeners but avoid re-attaching if they already exist (in
+      // case startServer is retried). Use named functions so we can remove
+      // them reliably in stopServer.
+      const handleStdout = (chunk: any) => { this.options.log(`server stdout: ${chunk.toString().trim()}`); };
+      const handleStderr = (chunk: any) => { this.options.log(`server stderr: ${chunk.toString().trim()}`); };
+      const handleExit = (code: any, signal: any) => { this.options.log(`server exit code=${code ?? 'null'} signal=${signal ?? 'null'}`); };
+
+      if (this.opencodeServerProc.stdout && !(this.opencodeServerProc.stdout as any).__opencode_listeners_installed) {
+        this.opencodeServerProc.stdout.on('data', handleStdout);
+        (this.opencodeServerProc.stdout as any).__opencode_listeners_installed = true;
       }
-      if (this.opencodeServerProc.stderr) {
-        this.opencodeServerProc.stderr.on('data', (chunk) => {
-          this.options.log(`server stderr: ${chunk.toString().trim()}`);
-        });
+      if (this.opencodeServerProc.stderr && !(this.opencodeServerProc.stderr as any).__opencode_listeners_installed) {
+        this.opencodeServerProc.stderr.on('data', handleStderr);
+        (this.opencodeServerProc.stderr as any).__opencode_listeners_installed = true;
       }
-      this.opencodeServerProc.on('exit', (code, signal) => {
-        this.options.log(`server exit code=${code ?? 'null'} signal=${signal ?? 'null'}`);
-      });
+      if (!(this.opencodeServerProc as any).__opencode_exit_listener_installed) {
+        this.opencodeServerProc.on('exit', handleExit);
+        (this.opencodeServerProc as any).__opencode_exit_listener_installed = true;
+      }
 
       this.opencodeServerPort = this.options.port;
 
@@ -144,6 +150,12 @@ export class OpencodeClient {
       this.setStatus('error', this.options.port);
       this.options.showToast('OpenCode server failed to start');
       if (this.opencodeServerProc) {
+        // Ensure we remove any listeners before killing the child process so
+        // we don't leak handlers if the start attempt fails and we later
+        // spawn again.
+        try { this.opencodeServerProc.stdout?.removeAllListeners?.(); } catch (_) {}
+        try { this.opencodeServerProc.stderr?.removeAllListeners?.(); } catch (_) {}
+        try { this.opencodeServerProc.removeAllListeners?.(); } catch (_) {}
         this.opencodeServerProc.kill();
         this.opencodeServerProc = null;
       }
@@ -158,6 +170,26 @@ export class OpencodeClient {
   stopServer(): void {
     if (!this.opencodeServerProc) return;
     try {
+      // Remove listeners on stdout/stderr and the process itself to avoid
+      // keeping references that may prevent GC or leak handlers across
+      // restarts.
+      try {
+        if (this.opencodeServerProc.stdout) {
+          try { this.opencodeServerProc.stdout.removeAllListeners(); } catch (_) {}
+          try { delete (this.opencodeServerProc.stdout as any).__opencode_listeners_installed; } catch (_) {}
+        }
+      } catch (_) {}
+      try {
+        if (this.opencodeServerProc.stderr) {
+          try { this.opencodeServerProc.stderr.removeAllListeners(); } catch (_) {}
+          try { delete (this.opencodeServerProc.stderr as any).__opencode_listeners_installed; } catch (_) {}
+        }
+      } catch (_) {}
+      try {
+        try { this.opencodeServerProc.removeAllListeners(); } catch (_) {}
+        try { delete (this.opencodeServerProc as any).__opencode_exit_listener_installed; } catch (_) {}
+      } catch (_) {}
+
       this.opencodeServerProc.kill();
       this.opencodeServerProc = null;
       this.setStatus('stopped', this.opencodeServerPort);
@@ -462,17 +494,21 @@ export class OpencodeClient {
     this.options.log(`sse connect session=${sessionId}`);
 
     const parser = new SseParser();
+    let resRef: any = null;
+
     const handlePayload = (payload: string) => {
       if (sseClosed) return;
       if (!payload) return;
-      if (payload === '[DONE]') {
-        this.options.log('sse done received');
-        sseClosed = true;
-        req.abort();
-        if (onComplete) onComplete();
-        resolve();
-        return;
-      }
+        if (payload === '[DONE]') {
+          this.options.log('sse done received');
+          sseClosed = true;
+          try { req.abort(); } catch (_) {}
+          try { resRef?.removeAllListeners?.(); } catch (_) {}
+          try { req.removeAllListeners?.(); } catch (_) {}
+          if (onComplete) onComplete();
+          resolve();
+          return;
+        }
 
       try {
         const payloadPreview = payload.length > 200 ? `${payload.slice(0, 200)}...` : payload;
@@ -557,20 +593,24 @@ export class OpencodeClient {
           }
         } else if (data.type === 'message.finish' && data.properties) {
           const finishSessionId = getSessionId(data.properties) || getSessionId(data);
-          if (finishSessionId === sessionId) {
-            this.options.log('sse message finish');
-            sseClosed = true;
-            req.abort();
-            if (onComplete) onComplete();
-            resolve();
-          }
+            if (finishSessionId === sessionId) {
+              this.options.log('sse message finish');
+              sseClosed = true;
+              try { req.abort(); } catch (_) {}
+              try { resRef?.removeAllListeners?.(); } catch (_) {}
+              try { req.removeAllListeners?.(); } catch (_) {}
+              if (onComplete) onComplete();
+              resolve();
+            }
         } else if (data.type === 'session.status' && data.properties) {
           const statusSessionId = getSessionId(data.properties) || getSessionId(data);
           const statusType = data.properties.status?.type;
           if (statusSessionId === sessionId && statusType === 'idle') {
             this.options.log('sse session idle');
             sseClosed = true;
-            req.abort();
+            try { req.abort(); } catch (_) {}
+            try { resRef?.removeAllListeners?.(); } catch (_) {}
+            try { req.removeAllListeners?.(); } catch (_) {}
             if (onComplete) onComplete();
             resolve();
           }
@@ -670,6 +710,7 @@ export class OpencodeClient {
     };
 
     const req = this.httpImpl.request(options, (res) => {
+      resRef = res;
       this.options.log(`sse status=${res.statusCode ?? 'unknown'}`);
 
       res.on('data', (chunk) => {
@@ -707,6 +748,9 @@ export class OpencodeClient {
         this.options.log(`sse response error: ${errMessage}`);
         appendLine(`{red-fg}SSE error: ${err}{/}`);
         updatePane();
+        // ensure listeners are removed to avoid leaking across retries
+        try { resRef?.removeAllListeners?.(); } catch (_) {}
+        try { req.removeAllListeners?.(); } catch (_) {}
         reject(err);
       });
     });
@@ -724,6 +768,8 @@ export class OpencodeClient {
         pane.pushLine(`{red-fg}Connection error: ${errMessage}{/}`);
       }
       this.options.render();
+      try { resRef?.removeAllListeners?.(); } catch (_) {}
+      try { req.removeAllListeners?.(); } catch (_) {}
       reject(err);
     });
 

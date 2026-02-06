@@ -129,7 +129,7 @@ describe('CLI Initialization Check Tests', () => {
 
   it('should fail comment create command when not initialized', async () => {
     try {
-      await execAsync(`tsx ${cliPath} --json comment create TEST-1 -a "Author" -c "Comment"`);
+      await execAsync(`tsx ${cliPath} --json comment create TEST-1 -a "Author" --body "Comment"`);
       throw new Error('Expected comment create command to fail, but it succeeded');
     } catch (error: any) {
       const result = JSON.parse(error.stdout || '{}');

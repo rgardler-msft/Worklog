@@ -115,11 +115,11 @@ describe('TUI Update Dialog', () => {
   });
 
   describe('Update Dialog UI Behavior', () => {
-    it('should render update dialog with stage, status, and priority options', () => {
+    it('should render update dialog with stage, status, priority, and comment box', () => {
       // Create blessed screen and dialog components
       const screen = blessed.screen({ mouse: true, smartCSR: true });
 
-      const updateDialog = blessed.box({
+       const updateDialog = blessed.box({
         parent: screen,
         top: 'center',
         left: 'center',
@@ -134,7 +134,7 @@ describe('TUI Update Dialog', () => {
         style: { border: { fg: 'magenta' } }
       });
 
-      const updateDialogText = blessed.box({
+       const updateDialogText = blessed.box({
         parent: updateDialog,
         top: 1,
         left: 2,
@@ -142,6 +142,16 @@ describe('TUI Update Dialog', () => {
         width: '100%-4',
         content: 'Update selected item fields:',
         tags: false
+      });
+
+      // Create a dummy textarea to reflect the new UI element
+      const updateDialogComment = blessed.textarea({
+        parent: updateDialog,
+        top: 22,
+        left: 2,
+        width: '100%-4',
+        height: 2,
+        inputOnFocus: true,
       });
 
       blessed.box({
@@ -237,6 +247,7 @@ describe('TUI Update Dialog', () => {
       expect(stageOptions.children.length).toBeGreaterThan(0);
       expect(statusOptions.children.length).toBeGreaterThan(0);
       expect(priorityOptions.children.length).toBeGreaterThan(0);
+      expect(updateDialogComment).toBeTruthy();
 
       screen.destroy();
     });
@@ -354,8 +365,9 @@ describe('TUI Update Dialog', () => {
       const stageList = blessed.list({ parent: screen, items: ['idea', 'done'] });
       const statusList = blessed.list({ parent: screen, items: ['open', 'completed'] });
       const priorityList = blessed.list({ parent: screen, items: ['high', 'low'] });
+      const commentBox = blessed.textarea({ parent: screen, inputOnFocus: true });
 
-      const focusManager = createUpdateDialogFocusManager([stageList, statusList, priorityList]);
+      const focusManager = createUpdateDialogFocusManager([stageList, statusList, priorityList, commentBox]);
 
       focusManager.focusIndex(0);
       expect(focusManager.getIndex()).toBe(0);
@@ -367,12 +379,58 @@ describe('TUI Update Dialog', () => {
       expect(focusManager.getIndex()).toBe(2);
 
       focusManager.cycle(1);
-      expect(focusManager.getIndex()).toBe(0);
+      expect(focusManager.getIndex()).toBe(3);
 
       focusManager.cycle(-1);
       expect(focusManager.getIndex()).toBe(2);
 
       screen.destroy();
+    });
+  });
+
+  describe('Update Dialog Comment Handling', () => {
+    it('should include comment in updates result when provided', () => {
+      const item = { status: 'open', stage: 'idea', priority: 'medium' };
+      const result = buildUpdateDialogUpdates(
+        item,
+        { statusIndex: 0, stageIndex: 0, priorityIndex: 2 },
+        {
+          statuses: ['open', 'in-progress', 'blocked', 'completed', 'deleted'],
+          stages: ['idea', 'prd_complete', 'plan_complete', 'in_progress', 'in_review', 'done'],
+          priorities: ['critical', 'high', 'medium', 'low'],
+        },
+        {
+          statusStage: STATUS_STAGE_COMPATIBILITY,
+          stageStatus: STAGE_STATUS_COMPATIBILITY,
+        },
+        'hello\nworld'
+      );
+
+      expect(result.comment).toBe('hello\nworld');
+      expect(result.hasChanges).toBe(false);
+      expect(result.updates).toEqual({});
+    });
+
+    it('should ignore blank comment values', () => {
+      const item = { status: 'open', stage: 'idea', priority: 'medium' };
+      const result = buildUpdateDialogUpdates(
+        item,
+        { statusIndex: 0, stageIndex: 0, priorityIndex: 2 },
+        {
+          statuses: ['open', 'in-progress', 'blocked', 'completed', 'deleted'],
+          stages: ['idea', 'prd_complete', 'plan_complete', 'in_progress', 'in_review', 'done'],
+          priorities: ['critical', 'high', 'medium', 'low'],
+        },
+        {
+          statusStage: STATUS_STAGE_COMPATIBILITY,
+          stageStatus: STAGE_STATUS_COMPATIBILITY,
+        },
+        '   '
+      );
+
+      expect(result.comment).toBeUndefined();
+      expect(result.hasChanges).toBe(false);
+      expect(result.updates).toEqual({});
     });
   });
 
@@ -458,6 +516,15 @@ describe('TUI Update Dialog', () => {
 
       expect(updateDialogText.getContent()).toContain('Status: in-progress · Stage: in_progress · Priority: critical');
 
+      updateDialogHeader({
+        status: 'completed',
+        stage: 'in_review',
+        priority: 'high',
+        adjusted: true
+      });
+
+      expect(updateDialogText.getContent()).toContain('(Adjusted)');
+
       screen.destroy();
     });
   });
@@ -471,6 +538,26 @@ describe('TUI Update Dialog', () => {
         {
           statuses: ['open', 'in-progress', 'blocked', 'completed', 'deleted'],
           stages: ['idea', 'prd_complete', 'plan_complete', 'in_progress', 'in_review', 'done'],
+          priorities: ['critical', 'high', 'medium', 'low'],
+        },
+        {
+          statusStage: STATUS_STAGE_COMPATIBILITY,
+          stageStatus: STAGE_STATUS_COMPATIBILITY,
+        }
+      );
+
+      expect(result.hasChanges).toBe(false);
+      expect(result.updates).toEqual({});
+    });
+
+    it('should reject incompatible selections based on list items', () => {
+      const item = { status: 'open', stage: 'idea', priority: 'medium' };
+      const result = buildUpdateDialogUpdates(
+        item,
+        { statusIndex: 0, stageIndex: 0, priorityIndex: 0 },
+        {
+          statuses: ['completed', 'open'],
+          stages: ['idea', 'in_review'],
           priorities: ['critical', 'high', 'medium', 'low'],
         },
         {
@@ -526,7 +613,7 @@ describe('TUI Update Dialog', () => {
       expect(result.updates).toEqual({});
     });
 
-    it('should call db.update once per submit action', () => {
+    it('should submit updates and comment in a single action', () => {
       const item = { id: 'WL-TEST-1', status: 'open', stage: 'idea', priority: 'medium' };
       const selections = { statusIndex: 2, stageIndex: 0, priorityIndex: 1 };
       const values = {
@@ -535,31 +622,107 @@ describe('TUI Update Dialog', () => {
         priorities: ['critical', 'high', 'medium', 'low'],
       };
       const updateCalls: Array<Record<string, string>> = [];
+      const commentCalls: string[] = [];
       const db = {
         update: (_id: string, updates: Record<string, string>) => {
           updateCalls.push(updates);
         },
+        createComment: (_payload: { workItemId: string; comment: string; author: string }) => {
+          commentCalls.push(_payload.comment);
+        },
       };
 
-      const submitUpdateDialog = () => {
-        const { updates, hasChanges } = buildUpdateDialogUpdates(item, selections, values, {
+      // Extend submission to include a comment via the new multiline textbox
+      const submitUpdateDialogWithComment = (comment?: string) => {
+        const { updates, hasChanges, comment: newComment } = buildUpdateDialogUpdates(item, selections, values, {
           statusStage: STATUS_STAGE_COMPATIBILITY,
           stageStatus: STAGE_STATUS_COMPATIBILITY,
-        });
-        if (!hasChanges) return;
-        db.update(item.id, updates);
+        }, comment);
+        if (!hasChanges && !newComment) return;
+        if (Object.keys(updates).length > 0) db.update(item.id, updates);
+        if (newComment) db.createComment({ workItemId: item.id, comment: newComment, author: '@tui' });
       };
 
-      submitUpdateDialog();
+      submitUpdateDialogWithComment();
       expect(updateCalls).toHaveLength(1);
       expect(updateCalls[0]).toEqual({
         status: 'blocked',
         priority: 'high',
       });
+      expect(commentCalls).toHaveLength(0);
 
       updateCalls.length = 0;
-      submitUpdateDialog();
+      commentCalls.length = 0;
+      submitUpdateDialogWithComment('hello');
       expect(updateCalls).toHaveLength(1);
+      expect(commentCalls).toHaveLength(1);
+      expect(commentCalls[0]).toBe('hello');
+    });
+
+    it('should preserve comment when update fails and allow retry', () => {
+      const updateCalls: Array<Record<string, string>> = [];
+      const commentCalls: string[] = [];
+      const db = {
+        update: (_id: string, updates: Record<string, string>) => {
+          updateCalls.push(updates);
+          throw new Error('Update failed');
+        },
+        createComment: (_payload: { workItemId: string; comment: string; author: string }) => {
+          commentCalls.push(_payload.comment);
+        },
+      };
+
+      let commentValue = 'keep me';
+      const submitUpdateDialogWithFailure = () => {
+        const { updates, hasChanges, comment } = buildUpdateDialogUpdates(
+          { status: 'open', stage: 'idea', priority: 'medium' },
+          { statusIndex: 1, stageIndex: 3, priorityIndex: 1 },
+          {
+            statuses: ['open', 'in-progress', 'blocked', 'completed', 'deleted'],
+            stages: ['idea', 'prd_complete', 'plan_complete', 'in_progress', 'in_review', 'done'],
+            priorities: ['critical', 'high', 'medium', 'low'],
+          },
+          {
+            statusStage: STATUS_STAGE_COMPATIBILITY,
+            stageStatus: STAGE_STATUS_COMPATIBILITY,
+          },
+          commentValue
+        );
+
+        try {
+          if (!hasChanges && !comment) return;
+          if (Object.keys(updates).length > 0) db.update('WL-TEST-1', updates);
+          if (comment) db.createComment({ workItemId: 'WL-TEST-1', comment, author: '@tui' });
+          commentValue = '';
+        } catch {
+          // Comment should be preserved for retry
+        }
+      };
+
+      submitUpdateDialogWithFailure();
+      expect(updateCalls).toHaveLength(1);
+      expect(commentCalls).toHaveLength(0);
+      expect(commentValue).toBe('keep me');
+    });
+
+    it('should treat blank stage as compatible with deleted status', () => {
+      const item = { status: 'open', stage: '', priority: 'medium' };
+      const result = buildUpdateDialogUpdates(
+        item,
+        { statusIndex: 0, stageIndex: 0, priorityIndex: 2 },
+        {
+          statuses: ['deleted'],
+          stages: [''],
+          priorities: ['critical', 'high', 'medium', 'low'],
+        },
+        {
+          statusStage: STATUS_STAGE_COMPATIBILITY,
+          stageStatus: STAGE_STATUS_COMPATIBILITY,
+        }
+      );
+
+      expect(result.hasChanges).toBe(true);
+      expect(result.updates).toEqual({ status: 'deleted' });
     });
 
     it('should not call db.update when Escape cancels', () => {
@@ -582,6 +745,38 @@ describe('TUI Update Dialog', () => {
       expect(updateCalls).toHaveLength(0);
       expect(closeCalls).toBe(1);
       void db;
+    });
+
+    it('should move focus forward and back when textarea handles Tab/Shift-Tab', () => {
+      const screen = blessed.screen({ mouse: true, smartCSR: true });
+      const stageList = blessed.list({ parent: screen, items: ['idea', 'done'] });
+      const statusList = blessed.list({ parent: screen, items: ['open', 'completed'] });
+      const priorityList = blessed.list({ parent: screen, items: ['high', 'low'] });
+      const commentBox = blessed.textarea({ parent: screen, inputOnFocus: true, keys: true });
+
+      const focusManager = createUpdateDialogFocusManager([stageList, statusList, priorityList, commentBox]);
+
+      const wireNavigation = (field: any) => {
+        field.on('keypress', (_ch: string, key: { name?: string }) => {
+          if (key?.name === 'tab') {
+            focusManager.cycle(1);
+          }
+          if (key?.name === 'S-tab') {
+            focusManager.cycle(-1);
+          }
+        });
+      };
+
+      [stageList, statusList, priorityList, commentBox].forEach(wireNavigation);
+
+      focusManager.focusIndex(3);
+      commentBox.emit('keypress', '', { name: 'tab', full: 'tab' });
+      expect(focusManager.getIndex()).toBe(0);
+
+      commentBox.emit('keypress', '', { name: 'S-tab', shift: true, full: 'S-tab' });
+      expect(focusManager.getIndex()).toBe(3);
+
+      screen.destroy();
     });
   });
 
@@ -717,4 +912,5 @@ describe('TUI Update Dialog', () => {
       screen.destroy();
     });
   });
+
 });

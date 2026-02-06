@@ -12,6 +12,7 @@ export default function register(ctx: PluginContext): void {
   
   program
     .command('in-progress')
+    .alias('in_progress')
     .description('List all in-progress work items in a tree layout showing hierarchy')
     .option('-a, --assignee <assignee>', 'Filter by assignee')
     .option('--prefix <prefix>', 'Override the default prefix')

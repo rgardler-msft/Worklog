@@ -77,6 +77,13 @@ export class DetailComponent {
   }
 
   destroy(): void {
+    // Remove any listeners attached to child widgets before destroying
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof this.copyIdButton.removeAllListeners === 'function') this.copyIdButton.removeAllListeners();
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof this.detail.removeAllListeners === 'function') this.detail.removeAllListeners();
     this.copyIdButton.destroy();
     this.detail.destroy();
   }

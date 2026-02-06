@@ -1,4 +1,4 @@
-import type { BlessedList } from './types.js';
+import type { BlessedList, BlessedTextarea } from './types.js';
 
 export interface UpdateDialogFocusManager {
   getIndex: () => number;
@@ -6,7 +6,7 @@ export interface UpdateDialogFocusManager {
   cycle: (direction: 1 | -1) => void;
 }
 
-export function createUpdateDialogFocusManager(fields: BlessedList[]): UpdateDialogFocusManager {
+export function createUpdateDialogFocusManager(fields: Array<BlessedList | BlessedTextarea>): UpdateDialogFocusManager {
   let index = 0;
 
   const clampIndex = () => {

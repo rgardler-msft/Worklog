@@ -16,6 +16,7 @@ export default function register(ctx: PluginContext): void {
 
   migrate
     .command('sort-index')
+    .alias('sort_index')
     .description('Add sort_index values based on existing next-item ordering')
     .option('--dry-run', 'Preview changes without writing to the database')
     .option('--gap <gap>', `Gap between sort_index values (default: ${DEFAULT_SORT_GAP})`, String(DEFAULT_SORT_GAP))

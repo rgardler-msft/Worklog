@@ -86,6 +86,23 @@ export class ListComponent {
   }
 
   destroy(): void {
+    // Remove listeners from transient widgets before destroying to avoid retaining callbacks
+    try {
+      // Remove any attached ctrl-w handler if present
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const h = (this.list as any).__opencode_ctrlw;
+      if (h && typeof (this.list as any).removeListener === 'function') {
+        try { (this.list as any).removeListener('keypress', h); } catch (_) {}
+        try { delete (this.list as any).__opencode_ctrlw; } catch (_) {}
+      }
+    } catch (_) {}
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore - blessed widget types may not list removeAllListeners
+    if (typeof this.footer.removeAllListeners === 'function') this.footer.removeAllListeners();
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof this.list.removeAllListeners === 'function') this.list.removeAllListeners();
     this.footer.destroy();
     this.list.destroy();
   }

@@ -139,6 +139,8 @@ Behavior:
 - `dep add` errors if the dependency already exists.
 - `dep rm` warns and exits 0 when ids are missing.
 - `dep list` warns and exits 0 when ids are missing.
+- `dep list --outgoing` shows only outbound dependencies.
+- `dep list --incoming` shows only inbound dependencies.
 
 Examples:
 

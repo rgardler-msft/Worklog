@@ -96,6 +96,9 @@ export class ModalDialogsComponent {
 
       const cleanup = () => {
         try { dialog.hide(); overlay.hide(); } catch (_) {}
+        try { list.removeAllListeners?.(); } catch (_) {}
+        try { dialog.removeAllListeners?.(); } catch (_) {}
+        try { overlay.removeAllListeners?.(); } catch (_) {}
         try { dialog.destroy(); } catch (_) {}
         try { overlay.destroy(); } catch (_) {}
       };
@@ -193,6 +196,10 @@ export class ModalDialogsComponent {
 
       const cleanup = () => {
         try { dialog.hide(); overlay.hide(); } catch (_) {}
+        try { buttons.removeAllListeners?.(); } catch (_) {}
+        try { textarea.removeAllListeners?.(); } catch (_) {}
+        try { dialog.removeAllListeners?.(); } catch (_) {}
+        try { overlay.removeAllListeners?.(); } catch (_) {}
         try { dialog.destroy(); } catch (_) {}
         try { overlay.destroy(); } catch (_) {}
       };
@@ -277,6 +284,10 @@ export class ModalDialogsComponent {
 
       const cleanup = () => {
         try { dialog.hide(); overlay.hide(); } catch (_) {}
+        try { input.removeAllListeners?.(); } catch (_) {}
+        try { cancelBtn.removeAllListeners?.(); } catch (_) {}
+        try { dialog.removeAllListeners?.(); } catch (_) {}
+        try { overlay.removeAllListeners?.(); } catch (_) {}
         try { dialog.destroy(); } catch (_) {}
         try { overlay.destroy(); } catch (_) {}
       };

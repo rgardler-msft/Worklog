@@ -25,7 +25,8 @@ export default function register(ctx: PluginContext): void {
     .alias('add')
     .description('Create a comment on a work item')
     .requiredOption('-a, --author <author>', 'Author of the comment')
-    .requiredOption('-c, --comment <comment>', 'Comment text (markdown supported)')
+    .option('-c, --comment <comment>', 'Comment text (markdown supported)')
+    .option('--body <body>', 'Comment text (markdown supported) — alias for --comment')
     .option('-r, --references <references>', 'Comma-separated list of references (work item IDs, file paths, or URLs)')
     .option('--prefix <prefix>', 'Override the default prefix')
     .action((workItemId: string, options: CommentCreateOptions) => {
@@ -41,10 +42,23 @@ export default function register(ctx: PluginContext): void {
         return t;
       }) : [];
 
+      // Support either --comment (legacy) or --body (new alias).
+      // Error if both provided.
+      if (options.comment && options.body) {
+        output.error('Cannot use both --comment and --body together.', { success: false, error: 'Cannot use both --comment and --body together.' });
+        process.exit(1);
+      }
+
+      const commentText = options.comment ?? options.body;
+      if (!commentText || commentText.trim() === '') {
+        output.error('Missing comment text. Provide --comment or --body with the comment text.', { success: false, error: 'Missing comment text. Provide --comment or --body with the comment text.' });
+        process.exit(1);
+      }
+
       const comment = db.createComment({
         workItemId: normalizedWorkItemId,
         author: options.author,
-        comment: options.comment,
+        comment: commentText,
         references: refs,
       });
       

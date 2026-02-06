@@ -17,7 +17,8 @@ describe('Sort Operations', () => {
     tempDir = createTempDir();
     dbPath = createTempDbPath(tempDir);
     jsonlPath = createTempJsonlPath(tempDir);
-    db = new WorklogDatabase('TEST', dbPath, jsonlPath, true, true);
+    // Disable JSONL auto-export to keep perf tests focused on sort operations.
+    db = new WorklogDatabase('TEST', dbPath, jsonlPath, false, true);
   });
 
   afterEach(() => {
@@ -336,9 +337,8 @@ describe('Sort Operations', () => {
 
   describe('performance with large datasets', () => {
     it('should handle 100 items efficiently', () => {
-      const createdItems = [];
       for (let i = 0; i < 100; i++) {
-        createdItems.push(db.create({ title: `Task ${i}`, sortIndex: i * 10 }));
+        db.create({ title: `Task ${i}`, sortIndex: i * 10 });
       }
 
       const startTime = Date.now();
@@ -351,15 +351,12 @@ describe('Sort Operations', () => {
 
     it('should handle 100 items per hierarchy level', () => {
       const parent = db.create({ title: 'Parent' });
-      const childrenCreated = [];
       for (let i = 0; i < 100; i++) {
-        childrenCreated.push(
-          db.create({ 
-            title: `Child ${i}`, 
-            parentId: parent.id,
-            sortIndex: i * 10 
-          })
-        );
+        db.create({ 
+          title: `Child ${i}`, 
+          parentId: parent.id,
+          sortIndex: i * 10 
+        });
       }
 
       const startTime = Date.now();

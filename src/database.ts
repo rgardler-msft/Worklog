@@ -173,10 +173,20 @@ export class WorklogDatabase {
     }
 
     const order: WorkItem[] = [];
+    const sortSiblings = (list: WorkItem[]): WorkItem[] => {
+      return list.slice().sort((a, b) => {
+        if (a.sortIndex !== b.sortIndex) {
+          return a.sortIndex - b.sortIndex;
+        }
+        const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        if (createdDiff !== 0) return createdDiff;
+        return a.id.localeCompare(b.id);
+      });
+    };
 
     const traverse = (parentId: string | null) => {
       const children = childrenByParent.get(parentId) || [];
-    const sorted = this.orderBySortIndex(children);
+      const sorted = sortSiblings(children);
       for (const child of sorted) {
         order.push(child);
         traverse(child.id);
@@ -675,6 +685,8 @@ export class WorklogDatabase {
 
     // Filter out deleted items first
     filteredItems = filteredItems.filter(item => item.status !== 'deleted');
+    // Exclude epics from being recommended by `wl next` by default
+    filteredItems = filteredItems.filter(item => item.issueType !== 'epic');
     if (!includeInReview) {
       filteredItems = filteredItems.filter(item => item.stage !== 'in_review');
     }
@@ -1112,6 +1124,7 @@ export class WorklogDatabase {
      }
 
      this.store.saveComment(comment);
+     this.touchWorkItemUpdatedAt(input.workItemId);
      this.exportToJsonl();
      this.triggerAutoSync();
      return comment;
@@ -1141,22 +1154,28 @@ export class WorklogDatabase {
       createdAt: comment.createdAt, // Prevent createdAt changes
     };
 
-    this.store.saveComment(updated);
-    this.exportToJsonl();
-    this.triggerAutoSync();
-    return updated;
+     this.store.saveComment(updated);
+     this.touchWorkItemUpdatedAt(comment.workItemId);
+     this.exportToJsonl();
+     this.triggerAutoSync();
+     return updated;
   }
 
   /**
    * Delete a comment
    */
   deleteComment(id: string): boolean {
-    const result = this.store.deleteComment(id);
-    if (result) {
-      this.exportToJsonl();
-      this.triggerAutoSync();
-    }
-    return result;
+     const comment = this.store.getComment(id);
+     if (!comment) {
+       return false;
+     }
+     const result = this.store.deleteComment(id);
+     if (result) {
+       this.touchWorkItemUpdatedAt(comment.workItemId);
+       this.exportToJsonl();
+       this.triggerAutoSync();
+     }
+     return result;
   }
 
   /**
@@ -1188,5 +1207,16 @@ export class WorklogDatabase {
     }
     this.exportToJsonl();
     this.triggerAutoSync();
+  }
+
+  private touchWorkItemUpdatedAt(workItemId: string): void {
+    const item = this.store.getWorkItem(workItemId);
+    if (!item) {
+      return;
+    }
+    this.store.saveWorkItem({
+      ...item,
+      updatedAt: new Date().toISOString(),
+    });
   }
 }

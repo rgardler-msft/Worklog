@@ -1,5 +1,5 @@
 import blessed from 'blessed';
-import type { BlessedBox, BlessedFactory, BlessedList, BlessedScreen } from '../types.js';
+import type { BlessedBox, BlessedFactory, BlessedList, BlessedScreen, BlessedTextarea } from '../types.js';
 import type { OverlaysComponent } from './overlays.js';
 
 export interface DialogsComponentOptions {
@@ -26,6 +26,7 @@ export class DialogsComponent {
   readonly updateDialogStageOptions: BlessedList;
   readonly updateDialogStatusOptions: BlessedList;
   readonly updateDialogPriorityOptions: BlessedList;
+  readonly updateDialogComment: BlessedTextarea;
 
   constructor(options: DialogsComponentOptions) {
     this.screen = options.parent;
@@ -211,23 +212,84 @@ export class DialogsComponent {
     this.updateDialogStatusOptions = statusList;
     this.updateDialogPriorityOptions = priorityList;
 
+    // Multiline comment textarea placed below the selection lists. It accepts
+    // inputOnFocus so Enter inserts newlines; Tab/Shift-Tab navigation is
+    // handled by focus management logic elsewhere.
+    // Create the textarea without a hard-coded height. We'll position it
+    // with `top` and `bottom` so it fills the available space inside the
+    // dialog. This prevents it from rendering below the dialog on small
+    // terminals and ensures it behaves as a multiline input.
+    this.updateDialogComment = this.blessedImpl.textarea({
+      parent: this.updateDialog,
+      // initial placement; updateLayout will adjust on show/resize
+      top: updateDialogListTop + updateDialogListHeight + 1,
+      left: 2,
+      right: 2,
+      width: '100%-4',
+      // Do not set `height` here — use `bottom` in updateLayout so the
+      // textarea expands to available space inside the dialog.
+      input: true,
+      inputOnFocus: true,
+      vi: true,
+      wrap: true,
+      keys: true,
+      mouse: true,
+      scrollable: true,
+      alwaysScroll: true,
+      // Provide a visible, grey border and a title label
+      border: { type: 'line' },
+      label: ' Comment ',
+      style: { fg: 'white', bg: 'black', border: { fg: 'gray' } },
+      // show a scrollbar when text exceeds the box
+      scrollbar: { ch: ' ', inverse: true },
+    }) as BlessedTextarea;
+
     const updateLayout = () => {
       const screenHeight = Math.max(0, this.screen.height as number);
       const screenWidth = Math.max(0, this.screen.width as number);
       if (!screenHeight || !screenWidth) return;
 
+      const extraCommentLines = screenHeight >= 28 ? 5 : 0;
+      const textareaMinHeight = 4 + extraCommentLines;
+
+      // Adjust overall dialog and list heights depending on screen size
       if (screenHeight < 28) {
         const height = Math.max(16, screenHeight - 4);
         this.updateDialog.height = height;
-        stageList.height = Math.max(6, height - 9);
-        statusList.height = stageList.height;
-        priorityList.height = stageList.height;
       } else {
         this.updateDialog.height = 24;
-        stageList.height = updateDialogListHeight;
-        statusList.height = updateDialogListHeight;
-        priorityList.height = updateDialogListHeight;
       }
+
+      // Size lists to leave room for the comment box inside the dialog.
+      const dialogHeight = Number(this.updateDialog.height as any) || 24;
+      const listMaxHeight = Math.max(6, updateDialogListHeight - extraCommentLines);
+      const listAvailable = dialogHeight - updateDialogListTop - textareaMinHeight - 3;
+      const listHeight = Math.max(6, Math.min(listMaxHeight, listAvailable));
+      stageList.height = listHeight;
+      statusList.height = listHeight;
+      priorityList.height = listHeight;
+
+      // Position the comment textarea directly below the lists and let it
+      // fill the remaining vertical space inside the dialog. Using a
+      // `bottom` value (instead of explicit numeric `height`) keeps the
+      // textarea responsive and prevents it from overflowing the dialog
+      // when the terminal is small.
+      const textareaTop = updateDialogListTop + listHeight + 1;
+      // Position textarea to start below the lists and extend to 1 row above
+      // the bottom border of the dialog. Using `bottom` ensures the control
+      // remains inside the dialog even when the dialog shrinks.
+      (this.updateDialogComment.top as any) = textareaTop;
+      // Some terminals/versions of blessed behave better when we set an
+      // explicit height rather than relying on `bottom`. Compute the height
+      // available inside the dialog and clamp it to a reasonable minimum so
+      // the textarea is always visible.
+      // Leave 2 rows for dialog borders/spacing
+      const available = dialogHeight - textareaTop - 2;
+      const textareaHeight = Math.max(textareaMinHeight, available);
+      (this.updateDialogComment.height as any) = textareaHeight;
+      (this.updateDialogComment.left as any) = 2;
+      (this.updateDialogComment.right as any) = 2;
+      try { if (typeof this.updateDialogComment.show === 'function') this.updateDialogComment.show(); } catch (_) {}
 
       this.updateDialog.width = screenWidth < 100 ? '90%' : '70%';
     };
@@ -268,15 +330,23 @@ export class DialogsComponent {
   }
 
   destroy(): void {
-    this.detailClose.destroy();
-    this.detailModal.destroy();
+    try { this.detailClose.removeAllListeners?.(); } catch (_) {}
+    try { this.detailModal.removeAllListeners?.(); } catch (_) {}
+    try { this.detailClose.destroy(); } catch (_) {}
+    try { this.detailModal.destroy(); } catch (_) {}
 
-    this.closeDialogOptions.destroy();
-    this.closeDialogText.destroy();
-    this.closeDialog.destroy();
+    try { this.closeDialogOptions.removeAllListeners?.(); } catch (_) {}
+    try { this.closeDialogText.removeAllListeners?.(); } catch (_) {}
+    try { this.closeDialog.removeAllListeners?.(); } catch (_) {}
+    try { this.closeDialogOptions.destroy(); } catch (_) {}
+    try { this.closeDialogText.destroy(); } catch (_) {}
+    try { this.closeDialog.destroy(); } catch (_) {}
 
-    this.updateDialogOptions.destroy();
-    this.updateDialogText.destroy();
-    this.updateDialog.destroy();
+    try { this.updateDialogOptions.removeAllListeners?.(); } catch (_) {}
+    try { this.updateDialogText.removeAllListeners?.(); } catch (_) {}
+    try { this.updateDialog.removeAllListeners?.(); } catch (_) {}
+    try { this.updateDialogOptions.destroy(); } catch (_) {}
+    try { this.updateDialogText.destroy(); } catch (_) {}
+    try { this.updateDialog.destroy(); } catch (_) {}
   }
 }

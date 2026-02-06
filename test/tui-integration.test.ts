@@ -56,21 +56,29 @@ const blessedMock = {
   }),
   box: vi.fn((opts: any) => {
     const handlersByEvent: Record<string, Function> = {};
+    const state: any = { content: opts?.content ?? '' };
     const widget: any = {
       hidden: !!opts?.hidden,
+      label: opts?.label,
+      width: opts?.width,
+      height: opts?.height,
+      atop: 0,
+      aleft: 0,
+      itop: 0,
+      ileft: 0,
       style: opts?.style || {},
       show: vi.fn(() => { widget.hidden = false; }),
       hide: vi.fn(() => { widget.hidden = true; }),
       on: vi.fn((ev: string, h: Function) => { handlers[ev] = h; handlersByEvent[ev] = h; }),
       key: vi.fn((keys: any, h: Function) => { handlers['key'] = h; }),
-      setContent: vi.fn(),
+      setContent: vi.fn((value: string) => { state.content = value; }),
       setLabel: vi.fn(),
       setFront: vi.fn(),
       pushLine: vi.fn(),
       setScroll: vi.fn(),
       setScrollPerc: vi.fn(),
       getScroll: vi.fn(() => 0),
-      getContent: vi.fn(() => ''),
+      getContent: vi.fn(() => state.content),
       setValue: vi.fn(),
       clearValue: vi.fn(),
       focus: vi.fn(() => {
@@ -78,8 +86,11 @@ const blessedMock = {
         handlersByEvent['focus']?.();
       }),
       destroy: vi.fn(),
+      _handlers: handlersByEvent,
     };
     widget._screen = (blessedMock as any)._lastScreen;
+    if (!(blessedMock as any)._boxes) (blessedMock as any)._boxes = [];
+    (blessedMock as any)._boxes.push(widget);
     return widget;
   }),
   list: vi.fn((opts: any) => {
@@ -94,7 +105,14 @@ const blessedMock = {
         widget._screen!.focused = widget;
         handlersByEvent['focus']?.();
       }),
-      key: vi.fn(),
+      key: vi.fn((keys: any, h: Function) => {
+        const list = Array.isArray(keys) ? keys : [keys];
+        list.forEach((entry: any) => {
+          if (typeof entry === 'string') {
+            handlers[`list-key:${entry}`] = h;
+          }
+        });
+      }),
       getScroll: vi.fn(() => 0),
       getContent: vi.fn(() => state.items.join('\n')),
       get selected() { return state.selected; },
@@ -115,6 +133,7 @@ describe('TUI integration: style preservation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     for (const k of Object.keys(handlers)) delete handlers[k];
+    (blessedMock as any)._boxes = [];
   });
 
   it('runs TUI action and ensures textarea.style object is preserved when layout logic executes', async () => {
@@ -483,5 +502,155 @@ describe('TUI integration: style preservation', () => {
 
     expect(detail?.style?.border?.fg).toBe('green');
     expect(listWidgetAfter?.style?.border?.fg).toBe('white');
+  });
+
+  it('advances to the next recommendation in the Next Item dialog', async () => {
+    vi.resetModules();
+    let savedAction: Function | null = null;
+    const program: any = {
+      opts: () => ({ verbose: false }),
+      command() { return this; },
+      description() { return this; },
+      option() { return this; },
+      action(fn: Function) { savedAction = fn; return this; },
+    };
+
+    const utils = {
+      requireInitialized: () => {},
+      getDatabase: () => ({
+        list: () => [{ id: 'WL-TEST-1', title: 'Item', status: 'open' }],
+        getPrefix: () => 'default',
+        getCommentsForWorkItem: (_id: string) => [],
+        get: () => ({ id: 'WL-TEST-1', title: 'Item', status: 'open' }),
+      }),
+    };
+
+    const spawnMock = vi.fn(() => {
+      const handlersByEvent: Record<string, Function> = {};
+      const stdoutHandlers: Function[] = [];
+      const stderrHandlers: Function[] = [];
+      const child: any = {
+        stdout: { on: vi.fn((_ev: string, h: Function) => stdoutHandlers.push(h)) },
+        stderr: { on: vi.fn((_ev: string, h: Function) => stderrHandlers.push(h)) },
+        on: vi.fn((ev: string, h: Function) => { handlersByEvent[ev] = h; }),
+        _emit: (ev: string, arg?: any) => { handlersByEvent[ev]?.(arg); },
+        _emitStdout: (data: string) => { stdoutHandlers.forEach(h => h(Buffer.from(data))); },
+        _emitStderr: (data: string) => { stderrHandlers.forEach(h => h(Buffer.from(data))); },
+      };
+      return child;
+    });
+
+    vi.doMock('child_process', async () => {
+      const actual = await vi.importActual<any>('child_process');
+      return { ...actual, spawn: spawnMock };
+    });
+
+    const mod = await import('../src/commands/tui');
+    const register = mod.default || mod;
+    register({ program, utils, blessed: blessedMock } as any);
+
+    await (savedAction as any)({});
+
+    const screenKeyN = handlers['screen-key:n'] || handlers['screen-key:N'];
+    expect(typeof screenKeyN).toBe('function');
+
+    const payload = {
+      success: true,
+      count: 2,
+      results: [
+        { workItem: { id: 'WL-1', title: 'First', status: 'open', stage: '', priority: 'high' }, reason: 'First choice' },
+        { workItem: { id: 'WL-2', title: 'Second', status: 'open', stage: '', priority: 'high' }, reason: 'Second choice' },
+      ],
+    };
+
+    screenKeyN(null, { name: 'n' });
+    expect(spawnMock).toHaveBeenCalled();
+
+    const firstCall = spawnMock.mock.results[0]?.value;
+    firstCall._emitStdout(JSON.stringify(payload));
+    firstCall._emit('close', 0);
+
+    const listMock = (blessedMock as any).list?.mock;
+    const listCalls = listMock?.calls || [];
+    const optionsIndex = listCalls.findIndex((call: any[]) => Array.isArray(call?.[0]?.items) && call[0].items.includes('Next recommendation'));
+    expect(optionsIndex).toBeGreaterThanOrEqual(0);
+
+    const boxMock = (blessedMock as any).box?.mock;
+    const contentCalls = boxMock?.results
+      ?.map((res: any) => res?.value?.setContent?.mock?.calls || [])
+      .flat();
+    const renderedFirst = contentCalls?.some((call: any[]) => String(call?.[0] || '').includes('First'));
+    expect(renderedFirst).toBe(true);
+
+    const dialogKeyHandler = handlers['list-key:n'] || handlers['list-key:N'];
+    expect(typeof dialogKeyHandler).toBe('function');
+
+    dialogKeyHandler(null, { name: 'n' });
+
+    const secondCall = spawnMock.mock.results[1]?.value;
+    expect(secondCall).toBeTruthy();
+    secondCall._emitStdout(JSON.stringify(payload));
+    secondCall._emit('close', 0);
+
+    const updatedCalls = boxMock?.results
+      ?.map((res: any) => res?.value?.setContent?.mock?.calls || [])
+      .flat();
+    const renderedSecond = updatedCalls?.some((call: any[]) => String(call?.[0] || '').includes('Second'));
+    expect(renderedSecond).toBe(true);
+  });
+
+  it('opens detail modal when clicking a wrapped line with an id', async () => {
+    vi.resetModules();
+    let savedAction: Function | null = null;
+    const program: any = {
+      opts: () => ({ verbose: false }),
+      command() { return this; },
+      description() { return this; },
+      option() { return this; },
+      action(fn: Function) { savedAction = fn; return this; },
+    };
+
+    const item = { id: 'WL-CLICK-1', title: 'Clickable', status: 'open' };
+    const utils = {
+      requireInitialized: () => {},
+      getDatabase: () => ({
+        list: () => [item],
+        getPrefix: () => 'default',
+        getCommentsForWorkItem: (_id: string) => [],
+        get: (id: string) => (id === item.id ? item : null),
+      }),
+    };
+
+    const opencodeClient = {
+      getStatus: () => ({ status: 'running', port: 9999 }),
+      startServer: vi.fn().mockResolvedValue(undefined),
+      stopServer: vi.fn(),
+      sendPrompt: vi.fn().mockResolvedValue(undefined),
+    };
+
+    vi.doMock('../src/tui/opencode-client.js', () => ({
+      OpencodeClient: function() { return opencodeClient; },
+    }));
+
+    const mod = await import('../src/commands/tui');
+    const register = mod.default || mod;
+    register({ program, utils, blessed: blessedMock } as any);
+    expect(typeof savedAction).toBe('function');
+    await (savedAction as any)({});
+
+    const boxes: any[] = (blessedMock as any)._boxes || [];
+    const detailBox = boxes.find((b) => b.label === ' Details ');
+    const detailModal = boxes.find((b) => b.label === ' Item Details ');
+    expect(detailBox).toBeTruthy();
+    expect(detailModal).toBeTruthy();
+
+    detailBox.lpos = { xi: 0, xl: 19, yi: 0, yl: 10 };
+    detailBox.setContent('prefix prefix prefix WL-CLICK-1 suffix');
+
+    const clickHandler = detailBox._handlers?.click;
+    expect(typeof clickHandler).toBe('function');
+
+    clickHandler({ y: 1, x: 1 });
+    expect(detailModal.show).toHaveBeenCalled();
   });
 });

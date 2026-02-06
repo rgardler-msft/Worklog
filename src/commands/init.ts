@@ -6,6 +6,7 @@ import type { PluginContext } from '../plugin-types.js';
 import type { InitOptions } from '../cli-types.js';
 import type { DependencyEdge } from '../types.js';
 import { initConfig, loadConfig, configExists, isInitialized, readInitSemaphore, writeInitSemaphore, type InitConfigOptions } from '../config.js';
+import { resolveWorklogDir } from '../worklog-paths.js';
 import { exportToJsonl } from '../jsonl.js';
 import { getRemoteDataFileContent, gitPushDataFileToBranch, mergeWorkItems, mergeComments, mergeDependencyEdges } from '../sync.js';
 import { DEFAULT_GIT_REMOTE, DEFAULT_GIT_BRANCH } from '../sync-defaults.js';
@@ -624,8 +625,8 @@ async function ensureStatsPluginInstalled(options: { silent: boolean; overwrite?
   const templatePath = locateExampleStatsPlugin();
   if (!templatePath) return { installed: false, skipped: true, reason: 'template not found', templatePath: null, destinationPath: null };
 
-  const projectRoot = resolveProjectRoot();
-  const pluginsDir = path.join(projectRoot, '.worklog', 'plugins');
+  const worklogDir = resolveWorklogDir();
+  const pluginsDir = path.join(worklogDir, 'plugins');
   const destinationPath = path.join(pluginsDir, 'stats-plugin.mjs');
 
   try {

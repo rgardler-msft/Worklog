@@ -74,6 +74,17 @@ export class OverlaysComponent {
   }
 
   destroy(): void {
+    // Remove listeners from overlays before destroying to avoid retaining handlers
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof this.detailOverlay.removeAllListeners === 'function') this.detailOverlay.removeAllListeners();
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof this.closeOverlay.removeAllListeners === 'function') this.closeOverlay.removeAllListeners();
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if (typeof this.updateOverlay.removeAllListeners === 'function') this.updateOverlay.removeAllListeners();
+
     this.detailOverlay.destroy();
     this.closeOverlay.destroy();
     this.updateOverlay.destroy();

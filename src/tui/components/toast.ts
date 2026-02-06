@@ -114,6 +114,13 @@ export class ToastComponent {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    // Remove any attached event handlers before destroying the widget to avoid leaks
+    // blessed widgets expose EventEmitter methods
+    // (removeAllListeners is a safe no-op if none are attached)
+    // Clear timers above then remove listeners and destroy
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore - blessed types don't always include removeAllListeners
+    if (typeof this.box.removeAllListeners === 'function') this.box.removeAllListeners();
     this.box.destroy();
   }
 }

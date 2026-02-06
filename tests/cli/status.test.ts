@@ -84,7 +84,7 @@ describe('CLI Status Tests', () => {
     const listResult = JSON.parse(listOutput);
     const firstItemId = listResult.workItems[0].id;
 
-    await execAsync(`tsx ${cliPath} comment create ${firstItemId} -a "Test Author" -c "Test comment"`);
+    await execAsync(`tsx ${cliPath} comment create ${firstItemId} -a "Test Author" --body "Test comment"`);
 
     const { stdout } = await execAsync(`tsx ${cliPath} --json status`);
 
