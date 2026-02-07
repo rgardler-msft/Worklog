@@ -528,21 +528,21 @@ describe('WorklogDatabase', () => {
       expect(result.workItem?.id).toBe(openItem.id);
     });
 
-    it('should exclude in_review items by default', () => {
-      const inReview = db.create({ title: 'In review', status: 'open', stage: 'in_review', priority: 'high' });
+    it('should exclude blocked in_review items by default', () => {
+      const inReviewBlocked = db.create({ title: 'In review', status: 'blocked', stage: 'in_review', priority: 'high' });
       const openItem = db.create({ title: 'Open', status: 'open', priority: 'low' });
 
       const result = db.findNextWorkItem();
       expect(result.workItem?.id).toBe(openItem.id);
-      expect(result.workItem?.id).not.toBe(inReview.id);
+      expect(result.workItem?.id).not.toBe(inReviewBlocked.id);
     });
 
-    it('should include in_review items when requested', () => {
-      const inReview = db.create({ title: 'In review', status: 'open', stage: 'in_review', priority: 'high' });
+    it('should include blocked in_review items when requested', () => {
+      const inReviewBlocked = db.create({ title: 'In review', status: 'blocked', stage: 'in_review', priority: 'high' });
       db.create({ title: 'Open', status: 'open', priority: 'low' });
 
       const result = db.findNextWorkItem(undefined, undefined, 'ignore', true);
-      expect(result.workItem?.id).toBe(inReview.id);
+      expect(result.workItem?.id).toBe(inReviewBlocked.id);
     });
 
     it('should filter by assignee when provided', () => {

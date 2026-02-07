@@ -715,7 +715,9 @@ export class WorklogDatabase {
     // Exclude epics from being recommended by `wl next` by default
     filteredItems = filteredItems.filter(item => item.issueType !== 'epic');
     if (!includeInReview) {
-      filteredItems = filteredItems.filter(item => item.stage !== 'in_review');
+      filteredItems = filteredItems.filter(
+        item => !(item.stage === 'in_review' && item.status === 'blocked')
+      );
     }
     if (excluded && excluded.size > 0) {
       filteredItems = filteredItems.filter(item => !excluded.has(item.id));

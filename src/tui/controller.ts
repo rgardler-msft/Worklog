@@ -14,6 +14,7 @@ import { humanFormatWorkItem, formatTitleOnlyTUI } from '../commands/helpers.js'
 import { createTuiState, rebuildTreeState, buildVisibleNodes } from './state.js';
 import { createPersistence } from './persistence.js';
 import { resolveWorklogDir } from '../worklog-paths.js';
+import { getDefaultDataPath } from '../jsonl.js';
 import { createLayout } from './layout.js';
 import { createUpdateDialogFocusManager } from './update-dialog-navigation.js';
 import { buildUpdateDialogUpdates } from './update-dialog-submit.js';
@@ -687,12 +688,157 @@ export class TuiController {
     let userTypedText = '';
     let isWaitingForResponse = false; // Track if we're waiting for OpenCode response
 
+    type OpencodeInputMode = 'insert' | 'normal';
+    let opencodeInputMode: OpencodeInputMode = 'insert';
+    let opencodeCursorIndex = 0;
+    let opencodeDesiredColumn: number | null = null;
+
+    const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+    const getOpencodeValue = () => (opencodeText.getValue ? opencodeText.getValue() : '');
+
+    const setOpencodeCursorIndex = (value: string, nextIndex: number) => {
+      opencodeCursorIndex = clampNumber(nextIndex, 0, value.length);
+      (opencodeText as any).__opencode_cursor = opencodeCursorIndex;
+    };
+
+    const setOpencodeInputMode = (mode: OpencodeInputMode) => {
+      opencodeInputMode = mode;
+      (opencodeText as any).__opencode_mode = opencodeInputMode;
+      updateOpencodePromptLabel(isWaitingForResponse ? 'waiting' : 'idle');
+    };
+
+    const updateOpencodePromptLabel = (state: 'idle' | 'waiting') => {
+      const modeSuffix = opencodeInputMode === 'normal' ? ' [normal]' : '';
+      const stateSuffix = state === 'waiting' ? ' (waiting...)' : '';
+      opencodeDialog.setLabel(` prompt${stateSuffix} [esc]${modeSuffix} `);
+    };
+
+    const getLineColumnFromIndex = (value: string, index: number) => {
+      const clamped = clampNumber(index, 0, value.length);
+      let line = 0;
+      let column = 0;
+      for (let i = 0; i < clamped; i += 1) {
+        if (value[i] === '\n') {
+          line += 1;
+          column = 0;
+        } else {
+          column += 1;
+        }
+      }
+      return { line, column };
+    };
+
+    const getIndexFromLineColumn = (value: string, line: number, column: number) => {
+      const lines = value.split('\n');
+      const safeLine = clampNumber(line, 0, Math.max(0, lines.length - 1));
+      let idx = 0;
+      for (let i = 0; i < safeLine; i += 1) {
+        idx += lines[i].length + 1;
+      }
+      const col = clampNumber(column, 0, lines[safeLine]?.length ?? 0);
+      return idx + col;
+    };
+
+    const moveOpencodeCursorHorizontal = (delta: number) => {
+      const value = getOpencodeValue();
+      setOpencodeCursorIndex(value, opencodeCursorIndex + delta);
+      const { column } = getLineColumnFromIndex(value, opencodeCursorIndex);
+      opencodeDesiredColumn = column;
+      updateOpencodeCursor();
+    };
+
+    const moveOpencodeCursorVertical = (delta: number) => {
+      const value = getOpencodeValue();
+      const position = getLineColumnFromIndex(value, opencodeCursorIndex);
+      const targetLine = position.line + delta;
+      const desiredColumn = opencodeDesiredColumn ?? position.column;
+      const nextIndex = getIndexFromLineColumn(value, targetLine, desiredColumn);
+      setOpencodeCursorIndex(value, nextIndex);
+      updateOpencodeCursor();
+    };
+
+    const opencodeTextBaseUpdateCursor = (opencodeText as any)._updateCursor?.bind(opencodeText);
+    const opencodeTextUpdateCursor = function(this: any, get?: boolean) {
+      if (this.screen?.focused !== this) return;
+      const lpos = get ? this.lpos : this._getCoords?.();
+      if (!lpos || !this.screen?.program) {
+        opencodeTextBaseUpdateCursor?.(get);
+        return;
+      }
+      if (!this._clines || !Array.isArray(this._clines) || !Array.isArray(this._clines.ftor)) {
+        opencodeTextBaseUpdateCursor?.(get);
+        return;
+      }
+
+      const value = typeof this.value === 'string' ? this.value : '';
+      const { line, column } = getLineColumnFromIndex(value, opencodeCursorIndex);
+      const wrappedIndexes: number[] = this._clines.ftor[line] ?? [];
+      const fallbackIndex = Math.min(line, Math.max(0, this._clines.length - 1));
+      const wrapped = wrappedIndexes.length ? wrappedIndexes : [fallbackIndex];
+
+      let remaining = column;
+      let wrappedIndex = wrapped[wrapped.length - 1] ?? fallbackIndex;
+      let columnInWrapped = 0;
+
+      for (const index of wrapped) {
+        const text = (this._clines[index] ?? '').replace(/\x1b\[[0-9;]*m/g, '');
+        const width = typeof this.strWidth === 'function' ? this.strWidth(text) : text.length;
+        if (remaining <= width) {
+          wrappedIndex = index;
+          columnInWrapped = remaining;
+          break;
+        }
+        remaining -= width;
+      }
+
+      if (wrappedIndex == null || wrappedIndex < 0) {
+        opencodeTextBaseUpdateCursor?.(get);
+        return;
+      }
+
+      const visibleLine = clampNumber(
+        wrappedIndex - (this.childBase || 0),
+        0,
+        Math.max(0, (lpos.yl - lpos.yi) - this.iheight - 1)
+      );
+      const lineText = (this._clines[wrappedIndex] ?? '').replace(/\x1b\[[0-9;]*m/g, '');
+      const colText = lineText.slice(0, columnInWrapped);
+      const cxOffset = typeof this.strWidth === 'function' ? this.strWidth(colText) : colText.length;
+      const cy = lpos.yi + this.itop + visibleLine;
+      const cx = lpos.xi + this.ileft + cxOffset;
+      const program = this.screen.program;
+
+      if (cy === program.y && cx === program.x) return;
+      if (cy === program.y) {
+        if (cx > program.x) {
+          program.cuf(cx - program.x);
+        } else if (cx < program.x) {
+          program.cub(program.x - cx);
+        }
+      } else if (cx === program.x) {
+        if (cy > program.y) {
+          program.cud(cy - program.y);
+        } else if (cy < program.y) {
+          program.cuu(program.y - cy);
+        }
+      } else {
+        program.cup(cy, cx);
+      }
+    };
+    try { (opencodeText as any)._updateCursor = opencodeTextUpdateCursor; } catch (_) {}
+
+    const updateOpencodeCursor = () => {
+      try { (opencodeText as any)._updateCursor?.(); } catch (_) {}
+      screen.render();
+    };
+
     function applyCommandSuggestion(target: any) {
       if (isCommandMode && currentSuggestion) {
-        target.setValue(currentSuggestion + ' ');
-        if (target.moveCursor) {
-          target.moveCursor(currentSuggestion.length + 1);
-        }
+        const nextValue = currentSuggestion + ' ';
+        target.setValue(nextValue);
+        setOpencodeCursorIndex(nextValue, nextValue.length);
+        updateOpencodeCursor();
         currentSuggestion = '';
         isCommandMode = false;
         suggestionHint.setContent('');
@@ -789,6 +935,93 @@ export class TuiController {
       };
       try { (opencodeText as any).__opencode_keypress = opencodeTextKeypressHandler; (opencodeText as any).on('keypress', opencodeTextKeypressHandler); } catch (_) {}
 
+    const opencodeTextInputHandler = function(this: any, ch: any, key: KeyInfo | undefined) {
+      const value = typeof this.value === 'string' ? this.value : '';
+      const name = key?.name;
+      const hasCtrl = !!key?.ctrl;
+
+      if (hasCtrl && name === 'n') {
+        setOpencodeInputMode(opencodeInputMode === 'insert' ? 'normal' : 'insert');
+        return true;
+      }
+
+      if (opencodeInputMode === 'normal') {
+        if (name === 'i') {
+          setOpencodeInputMode('insert');
+          return true;
+        }
+        if (name === 'left' || name === 'h') {
+          moveOpencodeCursorHorizontal(-1);
+          return;
+        }
+        if (name === 'right' || name === 'l') {
+          moveOpencodeCursorHorizontal(1);
+          return;
+        }
+        if (name === 'up' || name === 'k') {
+          moveOpencodeCursorVertical(-1);
+          return;
+        }
+        if (name === 'down' || name === 'j') {
+          moveOpencodeCursorVertical(1);
+          return;
+        }
+        return true;
+      }
+
+      if (name === 'left') {
+        moveOpencodeCursorHorizontal(-1);
+        return true;
+      }
+      if (name === 'right') {
+        moveOpencodeCursorHorizontal(1);
+        return true;
+      }
+      if (name === 'up') {
+        moveOpencodeCursorVertical(-1);
+        return true;
+      }
+      if (name === 'down') {
+        moveOpencodeCursorVertical(1);
+        return true;
+      }
+      if (name === 'backspace') {
+        if (opencodeCursorIndex > 0) {
+          const nextValue = value.slice(0, opencodeCursorIndex - 1) + value.slice(opencodeCursorIndex);
+          setOpencodeCursorIndex(nextValue, opencodeCursorIndex - 1);
+          opencodeDesiredColumn = null;
+          this.setValue?.(nextValue);
+          screen.render();
+        }
+        return true;
+      }
+      if (name === 'delete') {
+        if (opencodeCursorIndex < value.length) {
+          const nextValue = value.slice(0, opencodeCursorIndex) + value.slice(opencodeCursorIndex + 1);
+          setOpencodeCursorIndex(nextValue, opencodeCursorIndex);
+          opencodeDesiredColumn = null;
+          this.setValue?.(nextValue);
+          screen.render();
+        }
+        return true;
+      }
+      if (name === 'enter') {
+        return false;
+      }
+
+      const isLinefeed = name === 'linefeed';
+      const insertChar = isLinefeed ? '\n' : (typeof ch === 'string' ? ch : '');
+      if (!insertChar) return;
+      if (/^[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]$/.test(insertChar)) return;
+      const nextValue = value.slice(0, opencodeCursorIndex) + insertChar + value.slice(opencodeCursorIndex);
+      setOpencodeCursorIndex(nextValue, opencodeCursorIndex + insertChar.length);
+      opencodeDesiredColumn = null;
+      this.setValue?.(nextValue);
+      screen.render();
+      return true;
+    };
+      try { (opencodeText as any)._listener = opencodeTextInputHandler; } catch (_) {}
+
 
 
     // Active opencode pane/process tracking
@@ -853,7 +1086,7 @@ export class TuiController {
 
     async function openOpencodeDialog() {
       // Always use compact mode at bottom
-      opencodeDialog.setLabel(' prompt [esc] ');
+      updateOpencodePromptLabel('idle');
       opencodeDialog.top = undefined;  // Clear the center positioning
       opencodeDialog.left = 0;  // Clear the center positioning
       opencodeDialog.bottom = FOOTER_HEIGHT;
@@ -873,6 +1106,7 @@ export class TuiController {
       // Clear previous contents and focus textbox so typed characters appear
       try { if (typeof opencodeText.clearValue === 'function') opencodeText.clearValue(); } catch (_) {}
       try { if (typeof opencodeText.setValue === 'function') opencodeText.setValue(''); } catch (_) {}
+      setOpencodeCursorIndex('', 0);
       
       // Reset autocomplete state
       currentSuggestion = '';
@@ -899,6 +1133,7 @@ export class TuiController {
       // Just clear the input and keep it open
       try { if (typeof opencodeText.clearValue === 'function') opencodeText.clearValue(); } catch (_) {}
       try { if (typeof opencodeText.setValue === 'function') opencodeText.setValue(''); } catch (_) {}
+      setOpencodeCursorIndex('', 0);
       paneFocusIndex = getFocusPanes().indexOf(list);
       applyFocusStyles();
       screen.render();
@@ -1011,7 +1246,7 @@ export class TuiController {
 
       // Set flag to block new requests and update label
       isWaitingForResponse = true;
-      opencodeDialog.setLabel(' prompt (waiting...) [esc] ');
+      updateOpencodePromptLabel('waiting');
       screen.render();
 
       // Use HTTP API to communicate with server
@@ -1025,14 +1260,14 @@ export class TuiController {
           onComplete: () => {
           // Clear flag when response completes and restore label
           isWaitingForResponse = false;
-          opencodeDialog.setLabel(' prompt [esc] ');
+          updateOpencodePromptLabel('idle');
           openOpencodeDialog();
           },
         });
       } catch (err) {
         // Clear flag on error too and restore label
         isWaitingForResponse = false;
-        opencodeDialog.setLabel(' prompt [esc] ');
+        updateOpencodePromptLabel('idle');
         opencodePane.pushLine(`{red-fg}Server communication error: ${err}{/red-fg}`);
         screen.render();
       }
@@ -1508,16 +1743,45 @@ export class TuiController {
       openDetailsForId(parentId);
     }
 
-    function refreshFromDatabase(preferredIndex?: number) {
-      // Reset any active search filter when refreshing the full database view
-      activeFilterTerm = '';
-      preFilterItems = null;
+    type ListRefreshOptions = {
+      status?: 'in-progress' | 'blocked';
+      includeClosed?: boolean;
+      resetSearch?: boolean;
+      updateOptions?: { inProgress: boolean; all: boolean };
+      clearShowClosed?: boolean;
+      preferredIndex?: number;
+      fallbackIndex?: number;
+      allowFallback?: boolean;
+    };
+
+    function refreshListWithOptions(opts: ListRefreshOptions = {}) {
+      const {
+        status,
+        includeClosed = false,
+        resetSearch = true,
+        updateOptions,
+        clearShowClosed = false,
+        preferredIndex,
+        fallbackIndex,
+        allowFallback = true,
+      } = opts;
+
+      if (resetSearch) {
+        activeFilterTerm = '';
+        preFilterItems = null;
+      }
+      if (updateOptions) {
+        options.inProgress = updateOptions.inProgress;
+        options.all = updateOptions.all;
+      }
+      if (clearShowClosed) state.showClosed = false;
+
       const selected = getSelectedItem();
       const selectedId = selected?.id;
       const query: any = {};
-      if (options.inProgress) query.status = 'in-progress';
+      if (status) query.status = status;
       state.items = db.list(query);
-      const nextVisible = options.all
+      const nextVisible = includeClosed
         ? state.items.slice()
         : state.items.filter((item: any) => item.status !== 'completed' && item.status !== 'deleted');
       if (nextVisible.length === 0) {
@@ -1534,38 +1798,83 @@ export class TuiController {
       } else if (selectedId) {
         const found = visible.findIndex(n => n.item.id === selectedId);
         if (found >= 0) nextIndex = found;
+        else if (allowFallback && typeof fallbackIndex === 'number') {
+          nextIndex = Math.max(0, Math.min(fallbackIndex, visible.length - 1));
+        }
+      } else if (allowFallback && typeof fallbackIndex === 'number') {
+        nextIndex = Math.max(0, Math.min(fallbackIndex, visible.length - 1));
       }
       renderListAndDetail(nextIndex);
     }
 
+    function refreshFromDatabase(preferredIndex?: number, fallbackIndex?: number) {
+      refreshListWithOptions({
+        status: options.inProgress ? 'in-progress' : undefined,
+        includeClosed: options.all,
+        preferredIndex,
+        fallbackIndex,
+      });
+    }
+
+    const REFRESH_DEBOUNCE_MS = 300;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshFallbackIndex: number | null = null;
+    let dataWatcher: fs.FSWatcher | null = null;
+    let isShuttingDown = false;
+
+    const scheduleRefreshFromDatabase = (fallbackIndex?: number) => {
+      if (isShuttingDown) return;
+      if (typeof fallbackIndex === 'number') {
+        refreshFallbackIndex = fallbackIndex;
+      }
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        const fallback = refreshFallbackIndex ?? undefined;
+        refreshFallbackIndex = null;
+        refreshFromDatabase(undefined, fallback);
+      }, REFRESH_DEBOUNCE_MS);
+    };
+
+    const startDatabaseWatch = () => {
+      if (typeof fsImpl.watch !== 'function') return;
+      const dataPath = getDefaultDataPath();
+      const dataDir = pathImpl.dirname(dataPath);
+      const dataFile = pathImpl.basename(dataPath);
+      try {
+        dataWatcher = fsImpl.watch(dataDir, (eventType, filename) => {
+          if (isShuttingDown) return;
+          if (eventType !== 'change' && eventType !== 'rename') return;
+          if (filename && filename !== dataFile) return;
+          const selectedIndex = typeof list.selected === 'number' ? (list.selected as number) : 0;
+          scheduleRefreshFromDatabase(selectedIndex);
+        });
+      } catch (_) {
+        dataWatcher = null;
+      }
+    };
+
+    const stopDatabaseWatch = () => {
+      if (dataWatcher) {
+        try { dataWatcher.close(); } catch (_) {}
+        dataWatcher = null;
+      }
+    };
+
     function setFilterNext(filter: 'in-progress' | 'open' | 'blocked') {
-      // Clear any active search filter when switching filters
-      activeFilterTerm = '';
-      preFilterItems = null;
-      options.inProgress = false;
-      options.all = false;
-      state.showClosed = false;
-      const selected = getSelectedItem();
-      const selectedId = selected?.id;
-      const query: any = {};
-      if (filter === 'in-progress') query.status = 'in-progress';
-      if (filter === 'blocked') query.status = 'blocked';
-      state.items = db.list(query);
-      const nextVisible = state.items.filter((item: any) => item.status !== 'completed' && item.status !== 'deleted');
-      if (nextVisible.length === 0) {
-        list.setItems([]);
-        detail.setContent('');
-        screen.render();
-        return;
-      }
-      rebuildTree();
-      const visible = buildVisible();
-      let nextIndex = 0;
-      if (selectedId) {
-        const found = visible.findIndex(n => n.item.id === selectedId);
-        if (found >= 0) nextIndex = found;
-      }
-      renderListAndDetail(nextIndex);
+      const status = filter === 'in-progress'
+        ? 'in-progress'
+        : filter === 'blocked'
+          ? 'blocked'
+          : undefined;
+      const inProgress = filter === 'in-progress';
+      refreshListWithOptions({
+        status,
+        includeClosed: false,
+        updateOptions: { inProgress, all: false },
+        clearShowClosed: true,
+        allowFallback: false,
+      });
     }
 
     function getSelectedItem(): Item | null {
@@ -2021,26 +2330,9 @@ export class TuiController {
     const opencodeTextFocusHandler = () => { paneFocusIndex = getFocusPanes().indexOf(opencodeDialog); applyFocusStylesForPane(opencodeDialog); };
     try { (opencodeText as any).__opencode_focus = opencodeTextFocusHandler; opencodeText.on('focus', opencodeTextFocusHandler); } catch (_) {}
 
-    const listClickHandler = () => {
-      const idx = list.selected as number;
-      updateListSelection(idx, 'click');
-      list.focus();
-      paneFocusIndex = getFocusPanes().indexOf(list);
-      applyFocusStylesForPane(list);
-    };
-    try { (list as any).__opencode_click = listClickHandler; list.on('click', listClickHandler); } catch (_) {}
-
-    const listClickCoordsHandler = (data: any) => {
-      const coords = getClickRow(list as any, data);
-      if (!coords) return;
-      const scroll = list.getScroll() as number;
-      const lineIndex = coords.row + (scroll || 0);
-      const line = state.listLines[lineIndex];
-      if (!line) return;
-      const id = extractIdAtColumn(line, coords.col);
-      if (id) openDetailsForId(id);
-    };
-    try { (list as any).__opencode_click_coords = listClickCoordsHandler; list.on('click', listClickCoordsHandler); } catch (_) {}
+    // NOTE: List click-to-select is handled via screen.on('mouse') below,
+    // because blessed routes mouse events to list *item* child elements
+    // (which have higher z-index), so list.on('click') never fires.
 
     const detailClickHandler = (data: any) => {
       detail.focus();
@@ -2151,14 +2443,20 @@ export class TuiController {
     });
 
     const shutdown = () => {
+      isShuttingDown = true;
       // Persist state before exiting
       try { persistence.savePersistedState(db.getPrefix?.() || undefined, { expanded: Array.from(state.expanded) }); } catch (_) {}
+      stopDatabaseWatch();
       // Stop the OpenCode server if we started it
       opencodeClient.stopServer();
       // Clear pending timers to avoid keeping the process alive
       if (ctrlWTimeout) {
         try { clearTimeout(ctrlWTimeout); } catch (_) {}
         ctrlWTimeout = null;
+      }
+      if (refreshTimer) {
+        try { clearTimeout(refreshTimer); } catch (_) {}
+        refreshTimer = null;
       }
       if (lastCtrlWKeyHandledTimeout) {
         try { clearTimeout(lastCtrlWKeyHandledTimeout); } catch (_) {}
@@ -2221,6 +2519,8 @@ export class TuiController {
     paneFocusIndex = getFocusPanes().indexOf(list);
     applyFocusStyles();
     screen.render();
+
+    startDatabaseWatch();
 
     function openHelp() {
       helpMenu.show();
@@ -2340,13 +2640,17 @@ export class TuiController {
           if (preFilterItems) {
             state.items = preFilterItems.slice();
             preFilterItems = null;
+            rebuildTree();
+            renderListAndDetail(0);
           } else {
-            const query: any = {};
-            if (options.inProgress) query.status = 'in-progress';
-            state.items = db.list(query);
+            refreshListWithOptions({
+              status: options.inProgress ? 'in-progress' : undefined,
+              includeClosed: options.all,
+              resetSearch: false,
+              preferredIndex: 0,
+              allowFallback: false,
+            });
           }
-          rebuildTree();
-          renderListAndDetail(0);
           restoreListFocus();
           return;
         }
@@ -2694,6 +2998,22 @@ export class TuiController {
       if (!detailModal.hidden && !isInside(detailModal, data.x, data.y)) {
         closeDetails();
         return;
+      }
+      // List click-to-select: blessed routes mouse events to list item child
+      // elements so list.on('click') never fires. Handle it at screen level.
+      if (data.action === 'mousedown' && isInside(list, data.x, data.y)) {
+        const coords = getClickRow(list as any, data);
+        if (coords && coords.row >= 0) {
+          const scroll = (list as any).childBase ?? 0;
+          const lineIndex = coords.row + scroll;
+          if (lineIndex >= 0 && lineIndex < state.listLines.length) {
+            if (typeof list.select === 'function') list.select(lineIndex);
+            updateListSelection(lineIndex, 'screen-mouse');
+            list.focus();
+            paneFocusIndex = getFocusPanes().indexOf(list);
+            applyFocusStylesForPane(list);
+          }
+        }
       }
       if (detailModal.hidden && !helpMenu.isVisible() && isInside(detail, data.x, data.y)) {
         if (data.action === 'click' || data.action === 'mousedown') {

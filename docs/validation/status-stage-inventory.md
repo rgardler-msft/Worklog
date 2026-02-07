@@ -58,7 +58,7 @@ Adding/removing dependency edges affects status based on the dependency stage.
 
 ## Selection/Filtering Rules (Implied)
 The next-item selection logic treats in_review specially and filters statuses.
-- Exclude stage=in_review by default (unless --include-in-review)
+- Exclude status=blocked and stage=in_review by default (unless --include-in-review)
   - Source: src/commands/next.ts (option), src/database.ts (findNextWorkItemFromItems)
 - Filter out status=deleted in next-item selection
   - Source: src/database.ts (findNextWorkItemFromItems)

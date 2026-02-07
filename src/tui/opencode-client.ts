@@ -32,6 +32,17 @@ export interface PersistedStateStore {
   getPrefix?: () => string | undefined;
 }
 
+export interface OpencodeSseHandlers {
+  onTextDelta: (text: string) => void;
+  onTextReset: (text: string) => void;
+  onToolUse: (toolName: string, description?: string | null) => void;
+  onToolResult: (content: string) => void;
+  onPermissionRequest: () => void;
+  onQuestionAsked: (question: { question: string; options?: Array<{ label?: string; value?: string }> }, raw: any) => void;
+  onInputRequest: (input: { type?: string; prompt?: string }) => void;
+  onSessionEnd: () => void;
+}
+
 export interface OpencodePaneApi {
   setLabel?: (label: string) => void;
   setContent?: (content: string) => void;
@@ -75,6 +86,13 @@ export interface OpencodeClientOptions {
   onStatusChange?: (status: OpencodeServerStatus, port: number) => void;
   httpImpl?: typeof http;
   spawnImpl?: typeof spawn;
+}
+
+export interface SessionSelectionResult {
+  id: string;
+  workItemId?: string | null;
+  existing?: boolean;
+  localHistory?: any[] | null;
 }
 
 export class OpencodeClient {
@@ -216,15 +234,13 @@ export class OpencodeClient {
 
     return new Promise((resolve, reject) => {
       const preferredSessionId = options.getSelectedItemId ? options.getSelectedItemId() : null;
-      const sessionPromise = (this.currentSessionId && preferredSessionId && this.currentSessionId === preferredSessionId)
-        ? Promise.resolve(this.currentSessionId)
-        : this.createSession(preferredSessionId);
+      const sessionPromise = this.resolveSessionSelection(preferredSessionId);
 
       sessionPromise
-        .then(async (sessionObj) => {
-          const sessionId = typeof sessionObj === 'string' ? sessionObj : sessionObj.id;
-          const sessionWorkItemId = typeof sessionObj === 'string' ? null : (sessionObj.workItemId || null);
-          const sessionExisting = typeof sessionObj === 'object' && !!(sessionObj as any).existing;
+        .then(async (sessionObj: SessionSelectionResult) => {
+          const sessionId = sessionObj.id;
+          const sessionWorkItemId = sessionObj.workItemId || null;
+          const sessionExisting = !!sessionObj.existing;
           this.currentSessionId = sessionId;
           this.currentSessionWorkItemId = sessionWorkItemId;
 
@@ -265,7 +281,7 @@ export class OpencodeClient {
             }
           } else {
             try {
-              const localHist = (sessionObj as any)?.localHistory;
+              const localHist = sessionObj.localHistory;
               if (localHist && Array.isArray(localHist) && localHist.length > 0) {
                 this.options.log(`rendering local persisted history messages=${localHist.length} for workitem=${String(sessionWorkItemId)}`);
                 if (pane.setContent) {
@@ -299,7 +315,7 @@ export class OpencodeClient {
           let finalPrompt = prompt;
           if (!sessionExisting) {
             try {
-              const localHist = (sessionObj as any)?.localHistory;
+              const localHist = sessionObj.localHistory;
               if (localHist && Array.isArray(localHist) && localHist.length > 0) {
                 const choice = await this.options.modalDialogs.selectList({
                   title: 'Restore session',
@@ -397,7 +413,7 @@ export class OpencodeClient {
           sendReq.write(messageData);
           sendReq.end();
         })
-        .catch(err => {
+        .catch((err: unknown) => {
           safePushLine(`{red-fg}Session error: ${err}{/}`);
           this.options.render();
           reject(err);
@@ -411,6 +427,19 @@ export class OpencodeClient {
     if (this.options.onStatusChange) {
       this.options.onStatusChange(status, port);
     }
+  }
+
+  private resolveSessionSelection(preferredSessionId: string | null): Promise<SessionSelectionResult> {
+    const sessionFromMemory = this.getSessionFromCurrent(preferredSessionId);
+    if (sessionFromMemory) return Promise.resolve(sessionFromMemory);
+    return this.createSession(preferredSessionId);
+  }
+
+  private getSessionFromCurrent(preferredSessionId: string | null): SessionSelectionResult | null {
+    if (this.currentSessionId && preferredSessionId && this.currentSessionId === preferredSessionId) {
+      return { id: this.currentSessionId, workItemId: preferredSessionId, existing: true };
+    }
+    return null;
   }
 
   private async checkOpencodeServer(port: number): Promise<boolean> {
@@ -453,33 +482,22 @@ export class OpencodeClient {
     reject: Function,
     onComplete?: () => void,
   ) {
-    const getSessionId = (value: any) => {
-      return value?.sessionID || value?.sessionId || value?.session_id;
+    let resRef: any = null;
+    let req: any = null;
+    const onSessionEnd = () => {
+      try { req?.abort?.(); } catch (_) {}
+      try { resRef?.removeAllListeners?.(); } catch (_) {}
+      try { req?.removeAllListeners?.(); } catch (_) {}
+      if (onComplete) onComplete();
+      resolve();
     };
+    const sessionTools = this.createSessionTools(sessionId, pane, indicator, inputField, onSessionEnd);
     const partTextById = new Map<string, string>();
     const messageRoleById = new Map<string, string>();
     let lastUserMessageId: string | null = null;
-    let streamText = pane.getContent ? pane.getContent() : '';
     let sseClosed = false;
     let waitingForInput = false;
-    const appendText = (text: string) => {
-      streamText += text;
-    };
-    const appendLine = (line: string) => {
-      if (streamText && !streamText.endsWith('\n')) {
-        streamText += '\n';
-      }
-      streamText += line;
-    };
-    const updatePane = () => {
-      if (pane.setContent) {
-        pane.setContent(streamText);
-      }
-      if (typeof pane.setScrollPerc === 'function') {
-        pane.setScrollPerc(100);
-      }
-      this.options.render();
-    };
+    const { appendLine, updatePane } = sessionTools;
     const options = {
       hostname: 'localhost',
       port: this.opencodeServerPort,
@@ -494,21 +512,15 @@ export class OpencodeClient {
     this.options.log(`sse connect session=${sessionId}`);
 
     const parser = new SseParser();
-    let resRef: any = null;
-
     const handlePayload = (payload: string) => {
       if (sseClosed) return;
       if (!payload) return;
-        if (payload === '[DONE]') {
-          this.options.log('sse done received');
-          sseClosed = true;
-          try { req.abort(); } catch (_) {}
-          try { resRef?.removeAllListeners?.(); } catch (_) {}
-          try { req.removeAllListeners?.(); } catch (_) {}
-          if (onComplete) onComplete();
-          resolve();
-          return;
-        }
+      if (payload === '[DONE]') {
+        this.options.log('sse done received');
+        sseClosed = true;
+        onSessionEnd();
+        return;
+      }
 
       try {
         const payloadPreview = payload.length > 200 ? `${payload.slice(0, 200)}...` : payload;
@@ -517,203 +529,28 @@ export class OpencodeClient {
         const dataType = data?.type || 'unknown';
         this.options.log(`sse data type=${dataType}`);
 
-        const isMessagePart = data.type === 'message.part' || data.type === 'message.part.updated' || data.type === 'message.part.created';
-        if (isMessagePart && data.properties) {
-          const part = data.properties.part;
-          const partSessionId = getSessionId(part);
-          const eventSessionId = partSessionId || getSessionId(data.properties) || getSessionId(data);
-          if (part && eventSessionId === sessionId) {
-            const role = messageRoleById.get(part.messageID);
-            const isUserMessage = role === 'user' || (lastUserMessageId !== null && part.messageID === lastUserMessageId);
-            const promptMatches = prompt && part.text && part.text.trim() === prompt.trim();
-            if (isUserMessage || promptMatches) {
-              this.options.log(`sse message.part skipped user prompt role=${role ?? 'unknown'} messageID=${part.messageID}`);
-              partTextById.set(part.id || 'unknown', part.text || '');
-              return;
-            }
-            if (part.type === 'text' && part.text) {
-              const partId = part.id || 'unknown';
-              const prevText = partTextById.get(partId) || '';
-              if (part.text.startsWith(prevText)) {
-                const diff = part.text.slice(prevText.length);
-                if (diff) {
-                  appendText(diff);
-                  updatePane();
-                }
-                this.options.log(`sse text diff chars=${diff.length}`);
-              } else if (!prevText.startsWith(part.text)) {
-                appendLine(part.text);
-                updatePane();
-                this.options.log(`sse text reset chars=${part.text.length}`);
-              } else {
-                this.options.log(`sse text unchanged chars=${part.text.length}`);
-              }
-              partTextById.set(partId, part.text);
-            } else if (part.type === 'tool-use' && part.tool) {
-              appendLine(`{yellow-fg}[Tool: ${part.tool.name}]{/}`);
-              if (part.tool.description) {
-                appendLine(`  ${part.tool.description}`);
-              }
-              updatePane();
-              this.options.log(`sse tool use=${part.tool.name}`);
-            } else if (part.type === 'tool-result' && part.content) {
-              appendLine('{green-fg}[Tool Result]{/}');
-              const resultLines = part.content.split('\n');
-              for (const line of resultLines.slice(0, 10)) {
-                appendLine(`  ${line}`);
-              }
-              if (resultLines.length > 10) {
-                appendLine(`  ... (${resultLines.length - 10} more lines)`);
-              }
-              updatePane();
-              this.options.log(`sse tool result lines=${resultLines.length}`);
-            } else if (part.type === 'permission-request') {
-              waitingForInput = true;
-              indicator?.setContent?.('{yellow-fg}[!] Permission Required{/}');
-              indicator?.show?.();
-              inputField?.setLabel?.(' Permission Request ');
-              inputField?.show?.();
-              inputField?.focus?.();
-              updatePane();
-              this.options.log('sse permission request');
-            }
-          } else {
-            this.options.log(`sse message.part ignored session=${eventSessionId ?? 'unknown'}`);
-          }
-        } else if (data.type === 'message.updated' && data.properties?.info) {
-          const info = data.properties.info;
-          const messageId = info.id;
-          const messageRole = info.role;
-          if (messageId && messageRole) {
-            messageRoleById.set(messageId, messageRole);
-            if (messageRole === 'user') {
-              lastUserMessageId = messageId;
-            }
-            this.options.log(`sse message updated role=${messageRole} id=${messageId}`);
-          }
-        } else if (data.type === 'message.finish' && data.properties) {
-          const finishSessionId = getSessionId(data.properties) || getSessionId(data);
-            if (finishSessionId === sessionId) {
-              this.options.log('sse message finish');
-              sseClosed = true;
-              try { req.abort(); } catch (_) {}
-              try { resRef?.removeAllListeners?.(); } catch (_) {}
-              try { req.removeAllListeners?.(); } catch (_) {}
-              if (onComplete) onComplete();
-              resolve();
-            }
-        } else if (data.type === 'session.status' && data.properties) {
-          const statusSessionId = getSessionId(data.properties) || getSessionId(data);
-          const statusType = data.properties.status?.type;
-          if (statusSessionId === sessionId && statusType === 'idle') {
-            this.options.log('sse session idle');
-            sseClosed = true;
-            try { req.abort(); } catch (_) {}
-            try { resRef?.removeAllListeners?.(); } catch (_) {}
-            try { req.removeAllListeners?.(); } catch (_) {}
-            if (onComplete) onComplete();
-            resolve();
-          }
-        } else if (data.type === 'question.asked' && data.properties) {
-          const questionSessionId = getSessionId(data.properties) || getSessionId(data);
-          if (questionSessionId === sessionId) {
-            const questions = data.properties.questions;
-            if (questions && questions.length > 0) {
-              const question = questions[0];
-              const options = question.options || [];
-              this.options.log(`sse question asked: ${question.question}`);
-              this.options.log(`sse question options: ${JSON.stringify(options)}`);
-
-              appendLine(`{yellow-fg}OpenCode asking: ${question.question}{/}`);
-
-              let answer = 'save';
-              if (options.length > 0) {
-                answer = options[0].label || options[0].value || 'save';
-                appendLine(`{green-fg}Auto-answering with: ${answer}{/}`);
-                this.options.log(`sse question answering with: ${answer} from options: ${JSON.stringify(options[0])}`);
-              } else {
-                this.options.log(`sse question no options, using default: ${answer}`);
-              }
-
-              const answerData = JSON.stringify({
-                questionID: data.properties.id,
-                answer: answer,
-              });
-
-              this.options.log(`sse question sending answer: ${answerData}`);
-
-              const answerOptions = {
-                hostname: 'localhost',
-                port: this.opencodeServerPort,
-                path: `/session/${sessionId}/answer`,
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Content-Length': Buffer.byteLength(answerData),
-                },
-              };
-
-              const answerReq = this.httpImpl.request(answerOptions, (res) => {
-                this.options.log(`question answer status=${res.statusCode ?? 'unknown'}`);
-              });
-
-              answerReq.on('error', (err) => {
-                this.options.log(`question answer error: ${String(err)}`);
-                appendLine(`{red-fg}Failed to answer question: ${String(err)}{/}`);
-              });
-
-              answerReq.write(answerData);
-              answerReq.end();
-            }
-          }
-        } else if (data.type === 'input.request' && data.properties) {
-          const inputSessionId = getSessionId(data.properties) || getSessionId(data);
-          if (inputSessionId === sessionId) {
-            waitingForInput = true;
-            const inputType = data.properties.type || 'text';
-            const promptText = data.properties.prompt || 'Input required';
-
-            appendLine(`{yellow-fg}${promptText}{/}`);
-            indicator?.setContent?.('{yellow-fg}[!] Input Required{/}');
-            indicator?.show?.();
-
-            if (inputType === 'boolean') {
-              inputField?.setLabel?.(' Yes/No Input ');
-            } else if (inputType === 'password') {
-              inputField?.setLabel?.(' Password Input ');
-            } else {
-              inputField?.setLabel?.(' Input Required ');
-            }
-
-            inputField?.show?.();
-            inputField?.focus?.();
-            updatePane();
-            this.options.log(`sse input request type=${inputType}`);
-
-            inputField?.once?.('submit', (value: string) => {
-              this.sendInputResponse(sessionId, value);
-
-              waitingForInput = false;
-              indicator?.hide?.();
-              inputField?.hide?.();
-              inputField?.clearValue?.();
-              pane.focus?.();
-
-              appendLine(`{cyan-fg}> ${value}{/}`);
-              updatePane();
-            });
-          }
-        }
+        this.handleSseEvent({
+          data,
+          sessionId,
+          partTextById,
+          messageRoleById,
+          lastUserMessageId,
+          prompt,
+          handlers: sessionTools.handlers,
+          setLastUserMessageId: (value) => { lastUserMessageId = value; },
+          waitingForInput,
+          setWaitingForInput: (value) => { waitingForInput = value; },
+        });
       } catch (err) {
         this.options.log(`sse parse error: ${String(err)}`);
       }
     };
 
-    const req = this.httpImpl.request(options, (res) => {
+    req = this.httpImpl.request(options, (res) => {
       resRef = res;
       this.options.log(`sse status=${res.statusCode ?? 'unknown'}`);
 
-      res.on('data', (chunk) => {
+      res.on('data', (chunk: Buffer) => {
         this.options.log(`sse chunk bytes=${chunk.length}`);
         const events = parser.push(chunk);
         for (const event of events) {
@@ -737,7 +574,7 @@ export class OpencodeClient {
         resolve();
       });
 
-      res.on('error', (err) => {
+      res.on('error', (err: unknown) => {
         const errMessage = String(err);
         const errCode = (err as any)?.code;
         if (sseClosed || errMessage.includes('aborted') || errCode === 'ECONNRESET') {
@@ -755,7 +592,7 @@ export class OpencodeClient {
       });
     });
 
-    req.on('error', (err) => {
+    req.on('error', (err: unknown) => {
       const errMessage = String(err);
       const errCode = (err as any)?.code;
       if (sseClosed || errMessage.includes('aborted') || errCode === 'ECONNRESET') {
@@ -795,13 +632,290 @@ export class OpencodeClient {
       this.options.log(`input response status=${res.statusCode ?? 'unknown'}`);
     });
 
-    req.on('error', (err) => {
+    req.on('error', (err: unknown) => {
       this.options.log(`input response error: ${String(err)}`);
       console.error('Failed to send input response:', err);
     });
 
     req.write(responseData);
     req.end();
+  }
+
+  private getSessionId(value: any): string | undefined {
+    return value?.sessionID || value?.sessionId || value?.session_id;
+  }
+
+  private createSessionTools(
+    sessionId: string,
+    pane: OpencodePaneApi,
+    indicator: OpencodeIndicatorApi | null | undefined,
+    inputField: OpencodeInputFieldApi | null | undefined,
+    onSessionEnd: () => void,
+  ) {
+    let streamText = pane.getContent ? pane.getContent() : '';
+    const appendText = (text: string) => {
+      streamText += text;
+    };
+    const appendLine = (line: string) => {
+      if (streamText && !streamText.endsWith('\n')) {
+        streamText += '\n';
+      }
+      streamText += line;
+    };
+    const updatePane = () => {
+      if (pane.setContent) {
+        pane.setContent(streamText);
+      }
+      if (typeof pane.setScrollPerc === 'function') {
+        pane.setScrollPerc(100);
+      }
+      this.options.render();
+    };
+    const handlers: OpencodeSseHandlers = {
+      onTextDelta: (text) => {
+        appendText(text);
+        updatePane();
+      },
+      onTextReset: (text) => {
+        appendLine(text);
+        updatePane();
+      },
+      onToolUse: (toolName, description) => {
+        appendLine(`{yellow-fg}[Tool: ${toolName}]{/}`);
+        if (description) {
+          appendLine(`  ${description}`);
+        }
+        updatePane();
+      },
+      onToolResult: (content) => {
+        appendLine('{green-fg}[Tool Result]{/}');
+        const resultLines = content.split('\n');
+        for (const line of resultLines.slice(0, 10)) {
+          appendLine(`  ${line}`);
+        }
+        if (resultLines.length > 10) {
+          appendLine(`  ... (${resultLines.length - 10} more lines)`);
+        }
+        updatePane();
+      },
+      onPermissionRequest: () => {
+        indicator?.setContent?.('{yellow-fg}[!] Permission Required{/}');
+        indicator?.show?.();
+        inputField?.setLabel?.(' Permission Request ');
+        inputField?.show?.();
+        inputField?.focus?.();
+        updatePane();
+      },
+      onQuestionAsked: (question, raw) => {
+        this.options.log(`sse question asked: ${question.question}`);
+        this.options.log(`sse question options: ${JSON.stringify(question.options || [])}`);
+
+        appendLine(`{yellow-fg}OpenCode asking: ${question.question}{/}`);
+
+        let answer = 'save';
+        if (question.options && question.options.length > 0) {
+          answer = question.options[0].label || question.options[0].value || 'save';
+          appendLine(`{green-fg}Auto-answering with: ${answer}{/}`);
+          this.options.log(`sse question answering with: ${answer} from options: ${JSON.stringify(question.options[0])}`);
+        } else {
+          this.options.log(`sse question no options, using default: ${answer}`);
+        }
+
+        const answerData = JSON.stringify({
+          questionID: raw?.properties?.id,
+          answer,
+        });
+
+        this.options.log(`sse question sending answer: ${answerData}`);
+
+        const answerOptions = {
+          hostname: 'localhost',
+          port: this.opencodeServerPort,
+          path: `/session/${sessionId}/answer`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(answerData),
+          },
+        };
+
+        const answerReq = this.httpImpl.request(answerOptions, (res) => {
+          this.options.log(`question answer status=${res.statusCode ?? 'unknown'}`);
+        });
+
+        answerReq.on('error', (err: unknown) => {
+          this.options.log(`question answer error: ${String(err)}`);
+          appendLine(`{red-fg}Failed to answer question: ${String(err)}{/}`);
+        });
+
+        answerReq.write(answerData);
+        answerReq.end();
+      },
+      onInputRequest: (input) => {
+        const inputType = input.type || 'text';
+        const promptText = input.prompt || 'Input required';
+
+        appendLine(`{yellow-fg}${promptText}{/}`);
+        indicator?.setContent?.('{yellow-fg}[!] Input Required{/}');
+        indicator?.show?.();
+
+        if (inputType === 'boolean') {
+          inputField?.setLabel?.(' Yes/No Input ');
+        } else if (inputType === 'password') {
+          inputField?.setLabel?.(' Password Input ');
+        } else {
+          inputField?.setLabel?.(' Input Required ');
+        }
+
+        inputField?.show?.();
+        inputField?.focus?.();
+        updatePane();
+        this.options.log(`sse input request type=${inputType}`);
+
+        inputField?.once?.('submit', (value: string) => {
+          this.sendInputResponse(sessionId, value);
+
+          indicator?.hide?.();
+          inputField?.hide?.();
+          inputField?.clearValue?.();
+          pane.focus?.();
+
+          appendLine(`{cyan-fg}> ${value}{/}`);
+          updatePane();
+        });
+      },
+      onSessionEnd,
+    };
+
+    return { appendText, appendLine, updatePane, handlers };
+  }
+
+  private handleSseEvent(params: {
+    data: any;
+    sessionId: string;
+    partTextById: Map<string, string>;
+    messageRoleById: Map<string, string>;
+    lastUserMessageId: string | null;
+    prompt: string;
+    handlers: OpencodeSseHandlers;
+    setLastUserMessageId: (value: string) => void;
+    waitingForInput: boolean;
+    setWaitingForInput: (value: boolean) => void;
+  }) {
+    const {
+      data,
+      sessionId,
+      partTextById,
+      messageRoleById,
+      lastUserMessageId,
+      prompt,
+      handlers,
+      setLastUserMessageId,
+      waitingForInput,
+      setWaitingForInput,
+    } = params;
+    const dataType = data?.type || 'unknown';
+
+    const isMessagePart = dataType === 'message.part' || dataType === 'message.part.updated' || dataType === 'message.part.created';
+    if (isMessagePart && data.properties) {
+      const part = data.properties.part;
+      const partSessionId = this.getSessionId(part);
+      const eventSessionId = partSessionId || this.getSessionId(data.properties) || this.getSessionId(data);
+      if (part && eventSessionId === sessionId) {
+        const role = messageRoleById.get(part.messageID);
+        const isUserMessage = role === 'user' || (lastUserMessageId !== null && part.messageID === lastUserMessageId);
+        const promptMatches = prompt && part.text && part.text.trim() === prompt.trim();
+        if (isUserMessage || promptMatches) {
+          this.options.log(`sse message.part skipped user prompt role=${role ?? 'unknown'} messageID=${part.messageID}`);
+          partTextById.set(part.id || 'unknown', part.text || '');
+          return;
+        }
+        if (part.type === 'text' && part.text) {
+          const partId = part.id || 'unknown';
+          const prevText = partTextById.get(partId) || '';
+          if (part.text.startsWith(prevText)) {
+            const diff = part.text.slice(prevText.length);
+            if (diff) {
+              handlers.onTextDelta(diff);
+            }
+            this.options.log(`sse text diff chars=${diff.length}`);
+          } else if (!prevText.startsWith(part.text)) {
+            handlers.onTextReset(part.text);
+            this.options.log(`sse text reset chars=${part.text.length}`);
+          } else {
+            this.options.log(`sse text unchanged chars=${part.text.length}`);
+          }
+          partTextById.set(partId, part.text);
+        } else if (part.type === 'tool-use' && part.tool) {
+          handlers.onToolUse(part.tool.name, part.tool.description);
+          this.options.log(`sse tool use=${part.tool.name}`);
+        } else if (part.type === 'tool-result' && part.content) {
+          handlers.onToolResult(part.content);
+          this.options.log(`sse tool result lines=${String(part.content).split('\n').length}`);
+        } else if (part.type === 'permission-request') {
+          setWaitingForInput(true);
+          handlers.onPermissionRequest();
+          this.options.log('sse permission request');
+        }
+      } else {
+        this.options.log(`sse message.part ignored session=${eventSessionId ?? 'unknown'}`);
+      }
+      return;
+    }
+
+    if (dataType === 'message.updated' && data.properties?.info) {
+      const info = data.properties.info;
+      const messageId = info.id;
+      const messageRole = info.role;
+      if (messageId && messageRole) {
+        messageRoleById.set(messageId, messageRole);
+        if (messageRole === 'user') {
+          setLastUserMessageId(messageId);
+        }
+        this.options.log(`sse message updated role=${messageRole} id=${messageId}`);
+      }
+      return;
+    }
+
+    if (dataType === 'message.finish' && data.properties) {
+      const finishSessionId = this.getSessionId(data.properties) || this.getSessionId(data);
+      if (finishSessionId === sessionId) {
+        this.options.log('sse message finish');
+        handlers.onSessionEnd();
+      }
+      return;
+    }
+
+    if (dataType === 'session.status' && data.properties) {
+      const statusSessionId = this.getSessionId(data.properties) || this.getSessionId(data);
+      const statusType = data.properties.status?.type;
+      if (statusSessionId === sessionId && statusType === 'idle') {
+        this.options.log('sse session idle');
+        handlers.onSessionEnd();
+      }
+      return;
+    }
+
+    if (dataType === 'question.asked' && data.properties) {
+      const questionSessionId = this.getSessionId(data.properties) || this.getSessionId(data);
+      if (questionSessionId === sessionId) {
+        const questions = data.properties.questions;
+        if (questions && questions.length > 0) {
+          handlers.onQuestionAsked(questions[0], data);
+        }
+      }
+      return;
+    }
+
+    if (dataType === 'input.request' && data.properties) {
+      const inputSessionId = this.getSessionId(data.properties) || this.getSessionId(data);
+      if (inputSessionId === sessionId) {
+        if (!waitingForInput) {
+          setWaitingForInput(true);
+        }
+        handlers.onInputRequest({ type: data.properties.type, prompt: data.properties.prompt });
+      }
+    }
   }
 
   private getPersistedSessionIdForWorkItem(workItemId: string): string | null {
@@ -961,12 +1075,20 @@ export class OpencodeClient {
     });
   }
 
-  private async createSession(preferredId?: string | null): Promise<{ id: string; workItemId?: string | null; existing?: boolean; localHistory?: any[] | null }> {
+  private async createSession(preferredId?: string | null): Promise<SessionSelectionResult> {
     const sessionPayload: any = { title: 'TUI Session ' + new Date().toISOString() };
     if (preferredId) sessionPayload.title = `workitem:${preferredId} ${sessionPayload.title}`;
     if (preferredId) sessionPayload.id = preferredId;
     const sessionData = JSON.stringify(sessionPayload);
     this.options.log('create session');
+
+    return this.resolveSession(preferredId, sessionData);
+  }
+
+  private async resolveSession(
+    preferredId: string | null | undefined,
+    sessionData: string,
+  ): Promise<SessionSelectionResult> {
 
     try {
       if (preferredId) {
