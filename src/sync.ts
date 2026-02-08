@@ -3,6 +3,7 @@
  */
 
 import { WorkItem, Comment, ConflictDetail, ConflictFieldDetail, DependencyEdge } from './types.js';
+import { isDefaultValue, stableValueKey, stableItemKey, mergeTags } from './sync/merge-utils.js';
 import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -67,57 +68,6 @@ export interface MergeOptions {
   sameTimestampStrategy?: 'lexicographic' | 'local' | 'remote';
 }
 
-/**
- * Check if a value appears to be a default/empty value
- */
-function isDefaultValue(value: any, field: string, options?: MergeOptions): boolean {
-  if (options?.defaultValueFields?.includes(field as keyof WorkItem)) {
-    return false;
-  }
-  if (value === null || value === undefined || value === '') {
-    return true;
-  }
-  if (Array.isArray(value) && value.length === 0) {
-    return true;
-  }
-  // Only treat truly empty/undefined values as defaults. Do NOT assume
-  // that common values like 'open' or 'medium' imply the user didn't set
-  // them intentionally — any defined value is considered a real value.
-  // Treat empty strings as default for these metadata fields
-  if ((field === 'issueType' || field === 'createdBy' || field === 'deletedBy' || field === 'deleteReason') && value === '') {
-    return true;
-  }
-  return false;
-}
-
-function stableValueKey(value: unknown): string {
-  if (value === undefined) return 'u';
-  if (value === null) return 'n';
-  if (Array.isArray(value)) {
-    return `a:${JSON.stringify([...value].map(v => String(v)).sort())}`;
-  }
-  return `v:${JSON.stringify(value)}`;
-}
-
-function stableItemKey(item: WorkItem): string {
-  // Keep this stable across instances even if property insertion order differs.
-  // Tags are compared as a set.
-  const normalized: WorkItem = {
-    ...item,
-    tags: [...(item.tags || [])].slice().sort(),
-  };
-  const keys = Object.keys(normalized)
-    .filter(key => key !== 'dependencies')
-    .sort();
-  return JSON.stringify(normalized, keys);
-}
-
-function mergeTags(a: string[] | undefined, b: string[] | undefined): string[] {
-  const out = new Set<string>();
-  for (const t of a || []) out.add(String(t));
-  for (const t of b || []) out.add(String(t));
-  return Array.from(out).sort();
-}
 
 /**
  * Merge two sets of work items with intelligent field-level conflict resolution
@@ -131,276 +81,297 @@ export function mergeWorkItems(
 ): { merged: WorkItem[], conflicts: string[], conflictDetails: ConflictDetail[] } {
   const conflicts: string[] = [];
   const conflictDetails: ConflictDetail[] = [];
-  const mergedMap = new Map<string, WorkItem>();
-  
-  // Add all local items to the map
-  localItems.forEach(item => {
-    mergedMap.set(item.id, item);
-  });
-  
-  // Merge remote items
-  remoteItems.forEach(remoteItem => {
-    const localItem = mergedMap.get(remoteItem.id);
-    
-    if (!localItem) {
-      // New item from remote - add it
-      mergedMap.set(remoteItem.id, remoteItem);
-    } else {
-      // Item exists in both - perform intelligent field-level merge
-      const localUpdated = new Date(localItem.updatedAt).getTime();
-      const remoteUpdated = new Date(remoteItem.updatedAt).getTime();
+  const mergedMap = indexItemsById(localItems);
 
-      if (stableItemKey(localItem) === stableItemKey(remoteItem)) {
-        // Items are identical - no action needed
-        return;
-      }
-      
-      if (localUpdated === remoteUpdated) {
-        const sameTimestampStrategy = options?.sameTimestampStrategy ?? 'lexicographic';
-        const sameTimestampLabel = sameTimestampStrategy === 'lexicographic'
-          ? 'merged deterministically'
-          : `merged using ${sameTimestampStrategy} preference`;
-        // Same timestamp but different content - merge deterministically and bump updatedAt.
-        // This avoids "permanent divergence" across instances where the record differs but
-        // timestamps prevent a clear winner.
-        const merged: WorkItem = { ...localItem };
-        const fields: (keyof WorkItem)[] = ['title', 'description', 'status', 'priority', 'sortIndex', 'parentId', 'tags', 'assignee', 'stage', 'issueType', 'createdBy', 'deletedBy', 'deleteReason'];
-        const mergedFields: string[] = [];
-        const fieldDetails: ConflictFieldDetail[] = [];
+  for (const remoteItem of remoteItems) {
+    mergeRemoteItem(mergedMap, remoteItem, options, conflicts, conflictDetails);
+  }
 
-        for (const field of fields) {
-          const localValue = localItem[field];
-          const remoteValue = remoteItem[field];
-          const valuesEqual = stableValueKey(localValue) === stableValueKey(remoteValue);
-          if (valuesEqual) continue;
-
-          if (field === 'tags') {
-            const mergedTags = mergeTags(localValue as string[] | undefined, remoteValue as string[] | undefined);
-            (merged as any)[field] = mergedTags;
-            mergedFields.push('tags (union)');
-            fieldDetails.push({
-              field: 'tags',
-              localValue,
-              remoteValue,
-              chosenValue: mergedTags,
-              chosenSource: 'merged',
-              reason: 'union of both tag sets'
-            });
-            continue;
-          }
-
-           const localIsDefault = isDefaultValue(localValue, field, options);
-           const remoteIsDefault = isDefaultValue(remoteValue, field, options);
-
-          if (localIsDefault && !remoteIsDefault) {
-            (merged as any)[field] = remoteValue;
-            mergedFields.push(`${field} (from remote)`);
-            fieldDetails.push({
-              field,
-              localValue,
-              remoteValue,
-              chosenValue: remoteValue,
-              chosenSource: 'remote',
-              reason: 'remote has value, local is default'
-            });
-          } else if (!localIsDefault && remoteIsDefault) {
-            mergedFields.push(`${field} (from local)`);
-            fieldDetails.push({
-              field,
-              localValue,
-              remoteValue,
-              chosenValue: localValue,
-              chosenSource: 'local',
-              reason: 'local has value, remote is default'
-            });
-            } else {
-            const localKey = stableValueKey(localValue);
-            const remoteKey = stableValueKey(remoteValue);
-            const chooseRemote = sameTimestampStrategy === 'remote'
-              ? true
-              : sameTimestampStrategy === 'local'
-                ? false
-                : remoteKey > localKey;
-            const reason = sameTimestampStrategy === 'lexicographic'
-              ? 'deterministic tie-breaker (lexicographic)'
-              : `same-timestamp preference (${sameTimestampStrategy})`;
-            if (chooseRemote) {
-              (merged as any)[field] = remoteValue;
-              mergedFields.push(`${field} (tie-break: remote)`);
-              fieldDetails.push({
-                field,
-                localValue,
-                remoteValue,
-                chosenValue: remoteValue,
-                chosenSource: 'remote',
-                reason
-              });
-            } else {
-              mergedFields.push(`${field} (tie-break: local)`);
-              fieldDetails.push({
-                field,
-                localValue,
-                remoteValue,
-                chosenValue: localValue,
-                chosenSource: 'local',
-                reason
-              });
-            }
-          }
-        }
-
-        // Bump updatedAt so next sync has an unambiguous winner.
-        merged.updatedAt = new Date().toISOString();
-        merged.createdAt = localItem.createdAt;
-        mergedMap.set(remoteItem.id, merged);
-
-        conflicts.push(`${remoteItem.id}: Same updatedAt but different content - ${sameTimestampLabel} and bumped updatedAt`);
-        if (mergedFields.length > 0) {
-          conflicts.push(`${remoteItem.id}: Merged fields [${mergedFields.join(', ')}]`);
-        }
-        
-        if (fieldDetails.length > 0) {
-          conflictDetails.push({
-            itemId: remoteItem.id,
-            conflictType: 'same-timestamp',
-            fields: fieldDetails,
-            localUpdatedAt: localItem.updatedAt,
-            remoteUpdatedAt: remoteItem.updatedAt
-          });
-        }
-      } else {
-        // Different timestamps - perform field-by-field intelligent merge
-        const isRemoteNewer = remoteUpdated > localUpdated;
-        const merged: WorkItem = { ...localItem };  // Start with local
-        const fields: (keyof WorkItem)[] = ['title', 'description', 'status', 'priority', 'sortIndex', 'parentId', 'tags', 'assignee', 'stage', 'issueType', 'createdBy', 'deletedBy', 'deleteReason'];
-        
-        const mergedFields: string[] = [];
-        const conflictedFields: string[] = [];
-        const fieldDetails: ConflictFieldDetail[] = [];
-        
-        for (const field of fields) {
-          const localValue = localItem[field];
-          const remoteValue = remoteItem[field];
-          
-          // Compare values
-          let valuesEqual = false;
-          if (Array.isArray(localValue) && Array.isArray(remoteValue)) {
-            valuesEqual = JSON.stringify([...localValue].sort()) === JSON.stringify([...remoteValue].sort());
-          } else {
-            valuesEqual = localValue === remoteValue;
-          }
-          
-          if (!valuesEqual) {
-            // Values differ - decide which to use
-            const localIsDefault = isDefaultValue(localValue, field, options);
-            const remoteIsDefault = isDefaultValue(remoteValue, field, options);
-
-            if (field === 'tags') {
-              const mergedTags = mergeTags(localValue as string[] | undefined, remoteValue as string[] | undefined);
-              (merged as any)[field] = mergedTags;
-              mergedFields.push('tags (union)');
-              fieldDetails.push({
-                field: 'tags',
-                localValue,
-                remoteValue,
-                chosenValue: mergedTags,
-                chosenSource: 'merged',
-                reason: 'union of both tag sets'
-              });
-              continue;
-            }
-
-            
-            if (localIsDefault && !remoteIsDefault) {
-              // Remote has a value, local is default - use remote
-              (merged as any)[field] = remoteValue;
-              mergedFields.push(`${field} (from remote)`);
-              fieldDetails.push({
-                field,
-                localValue,
-                remoteValue,
-                chosenValue: remoteValue,
-                chosenSource: 'remote',
-                reason: 'remote has value, local is default'
-              });
-            } else if (!localIsDefault && remoteIsDefault) {
-              // Local has a value, remote is default - keep local
-              mergedFields.push(`${field} (from local)`);
-              fieldDetails.push({
-                field,
-                localValue,
-                remoteValue,
-                chosenValue: localValue,
-                chosenSource: 'local',
-                reason: 'local has value, remote is default'
-              });
-            } else {
-              // Both have non-default values - use timestamp to decide
-              if (isRemoteNewer) {
-                (merged as any)[field] = remoteValue;
-                conflictedFields.push(field);
-                fieldDetails.push({
-                  field,
-                  localValue,
-                  remoteValue,
-                  chosenValue: remoteValue,
-                  chosenSource: 'remote',
-                  reason: `remote is newer (${remoteItem.updatedAt})`
-                });
-              } else {
-                // Keep local value
-                conflictedFields.push(field);
-                fieldDetails.push({
-                  field,
-                  localValue,
-                  remoteValue,
-                  chosenValue: localValue,
-                  chosenSource: 'local',
-                  reason: `local is newer (${localItem.updatedAt})`
-                });
-              }
-            }
-          }
-        }
-        
-        // Use the most recent updatedAt
-        merged.updatedAt = isRemoteNewer ? remoteItem.updatedAt : localItem.updatedAt;
-        merged.createdAt = localItem.createdAt; // Preserve original createdAt
-        
-        // Update the map
-        mergedMap.set(remoteItem.id, merged);
-        
-        // Report results
-        if (conflictedFields.length > 0) {
-          conflicts.push(
-            `${remoteItem.id}: Conflicting fields [${conflictedFields.join(', ')}] resolved using ${isRemoteNewer ? 'remote' : 'local'} values (${isRemoteNewer ? 'remote' : 'local'}: ${isRemoteNewer ? remoteItem.updatedAt : localItem.updatedAt}, ${isRemoteNewer ? 'local' : 'remote'}: ${isRemoteNewer ? localItem.updatedAt : remoteItem.updatedAt})`
-          );
-        }
-        
-        if (mergedFields.length > 0) {
-          conflicts.push(
-            `${remoteItem.id}: Merged fields [${mergedFields.join(', ')}]`
-          );
-        }
-        
-        if (fieldDetails.length > 0) {
-          conflictDetails.push({
-            itemId: remoteItem.id,
-            conflictType: 'different-timestamp',
-            fields: fieldDetails,
-            localUpdatedAt: localItem.updatedAt,
-            remoteUpdatedAt: remoteItem.updatedAt
-          });
-        }
-      }
-    }
-  });
-  
   return {
     merged: Array.from(mergedMap.values()),
     conflicts,
     conflictDetails
   };
+}
+
+function indexItemsById(items: WorkItem[]): Map<string, WorkItem> {
+  const mergedMap = new Map<string, WorkItem>();
+  for (const item of items) {
+    mergedMap.set(item.id, item);
+  }
+  return mergedMap;
+}
+
+function mergeRemoteItem(
+  mergedMap: Map<string, WorkItem>,
+  remoteItem: WorkItem,
+  options: MergeOptions | undefined,
+  conflicts: string[],
+  conflictDetails: ConflictDetail[]
+): void {
+  const localItem = mergedMap.get(remoteItem.id);
+
+  if (!localItem) {
+    mergedMap.set(remoteItem.id, remoteItem);
+    return;
+  }
+
+  const localUpdated = new Date(localItem.updatedAt).getTime();
+  const remoteUpdated = new Date(remoteItem.updatedAt).getTime();
+
+  if (stableItemKey(localItem) === stableItemKey(remoteItem)) {
+    return;
+  }
+
+  if (localUpdated === remoteUpdated) {
+    const sameTimestampMerge = mergeSameTimestampItems(localItem, remoteItem, options);
+    mergedMap.set(remoteItem.id, sameTimestampMerge.merged);
+    conflicts.push(...sameTimestampMerge.conflictMessages);
+    if (sameTimestampMerge.conflictDetail) {
+      conflictDetails.push(sameTimestampMerge.conflictDetail);
+    }
+    return;
+  }
+
+  const differentTimestampMerge = mergeDifferentTimestampItems(localItem, remoteItem, options);
+  mergedMap.set(remoteItem.id, differentTimestampMerge.merged);
+  conflicts.push(...differentTimestampMerge.conflictMessages);
+  if (differentTimestampMerge.conflictDetail) {
+    conflictDetails.push(differentTimestampMerge.conflictDetail);
+  }
+}
+
+function mergeSameTimestampItems(
+  localItem: WorkItem,
+  remoteItem: WorkItem,
+  options: MergeOptions | undefined
+): { merged: WorkItem; conflictMessages: string[]; conflictDetail: ConflictDetail | null } {
+  const sameTimestampStrategy = options?.sameTimestampStrategy ?? 'lexicographic';
+  const sameTimestampLabel = sameTimestampStrategy === 'lexicographic'
+    ? 'merged deterministically'
+    : `merged using ${sameTimestampStrategy} preference`;
+  const merged: WorkItem = { ...localItem };
+  const fields: (keyof WorkItem)[] = ['title', 'description', 'status', 'priority', 'sortIndex', 'parentId', 'tags', 'assignee', 'stage', 'issueType', 'createdBy', 'deletedBy', 'deleteReason'];
+  const mergedFields: string[] = [];
+  const fieldDetails: ConflictFieldDetail[] = [];
+
+  for (const field of fields) {
+    const localValue = localItem[field];
+    const remoteValue = remoteItem[field];
+    const valuesEqual = stableValueKey(localValue) === stableValueKey(remoteValue);
+    if (valuesEqual) continue;
+
+    if (field === 'tags') {
+      const mergedTags = mergeTags(localValue as string[] | undefined, remoteValue as string[] | undefined);
+      (merged as any)[field] = mergedTags;
+      mergedFields.push('tags (union)');
+      fieldDetails.push({
+        field: 'tags',
+        localValue,
+        remoteValue,
+        chosenValue: mergedTags,
+        chosenSource: 'merged',
+        reason: 'union of both tag sets'
+      });
+      continue;
+    }
+
+    const localIsDefault = isDefaultValue(localValue, field, options);
+    const remoteIsDefault = isDefaultValue(remoteValue, field, options);
+
+    if (localIsDefault && !remoteIsDefault) {
+      (merged as any)[field] = remoteValue;
+      mergedFields.push(`${field} (from remote)`);
+      fieldDetails.push({
+        field,
+        localValue,
+        remoteValue,
+        chosenValue: remoteValue,
+        chosenSource: 'remote',
+        reason: 'remote has value, local is default'
+      });
+    } else if (!localIsDefault && remoteIsDefault) {
+      mergedFields.push(`${field} (from local)`);
+      fieldDetails.push({
+        field,
+        localValue,
+        remoteValue,
+        chosenValue: localValue,
+        chosenSource: 'local',
+        reason: 'local has value, remote is default'
+      });
+    } else {
+      const localKey = stableValueKey(localValue);
+      const remoteKey = stableValueKey(remoteValue);
+      const chooseRemote = sameTimestampStrategy === 'remote'
+        ? true
+        : sameTimestampStrategy === 'local'
+          ? false
+          : remoteKey > localKey;
+      const reason = sameTimestampStrategy === 'lexicographic'
+        ? 'deterministic tie-breaker (lexicographic)'
+        : `same-timestamp preference (${sameTimestampStrategy})`;
+      if (chooseRemote) {
+        (merged as any)[field] = remoteValue;
+        mergedFields.push(`${field} (tie-break: remote)`);
+        fieldDetails.push({
+          field,
+          localValue,
+          remoteValue,
+          chosenValue: remoteValue,
+          chosenSource: 'remote',
+          reason
+        });
+      } else {
+        mergedFields.push(`${field} (tie-break: local)`);
+        fieldDetails.push({
+          field,
+          localValue,
+          remoteValue,
+          chosenValue: localValue,
+          chosenSource: 'local',
+          reason
+        });
+      }
+    }
+  }
+
+  // Bump updatedAt so next sync has an unambiguous winner.
+  merged.updatedAt = new Date().toISOString();
+  merged.createdAt = localItem.createdAt;
+
+  const conflictMessages: string[] = [
+    `${remoteItem.id}: Same updatedAt but different content - ${sameTimestampLabel} and bumped updatedAt`
+  ];
+  if (mergedFields.length > 0) {
+    conflictMessages.push(`${remoteItem.id}: Merged fields [${mergedFields.join(', ')}]`);
+  }
+
+  const conflictDetail = fieldDetails.length > 0
+    ? {
+      itemId: remoteItem.id,
+      conflictType: 'same-timestamp' as const,
+      fields: fieldDetails,
+      localUpdatedAt: localItem.updatedAt,
+      remoteUpdatedAt: remoteItem.updatedAt
+    }
+    : null;
+
+  return { merged, conflictMessages, conflictDetail };
+}
+
+function mergeDifferentTimestampItems(
+  localItem: WorkItem,
+  remoteItem: WorkItem,
+  options: MergeOptions | undefined
+): { merged: WorkItem; conflictMessages: string[]; conflictDetail: ConflictDetail | null } {
+  const isRemoteNewer = new Date(remoteItem.updatedAt).getTime() > new Date(localItem.updatedAt).getTime();
+  const merged: WorkItem = { ...localItem };
+  const fields: (keyof WorkItem)[] = ['title', 'description', 'status', 'priority', 'sortIndex', 'parentId', 'tags', 'assignee', 'stage', 'issueType', 'createdBy', 'deletedBy', 'deleteReason'];
+  const mergedFields: string[] = [];
+  const conflictedFields: string[] = [];
+  const fieldDetails: ConflictFieldDetail[] = [];
+
+  for (const field of fields) {
+    const localValue = localItem[field];
+    const remoteValue = remoteItem[field];
+
+    let valuesEqual = false;
+    if (Array.isArray(localValue) && Array.isArray(remoteValue)) {
+      valuesEqual = JSON.stringify([...localValue].sort()) === JSON.stringify([...remoteValue].sort());
+    } else {
+      valuesEqual = localValue === remoteValue;
+    }
+
+    if (!valuesEqual) {
+      const localIsDefault = isDefaultValue(localValue, field, options);
+      const remoteIsDefault = isDefaultValue(remoteValue, field, options);
+
+      if (field === 'tags') {
+        const mergedTags = mergeTags(localValue as string[] | undefined, remoteValue as string[] | undefined);
+        (merged as any)[field] = mergedTags;
+        mergedFields.push('tags (union)');
+        fieldDetails.push({
+          field: 'tags',
+          localValue,
+          remoteValue,
+          chosenValue: mergedTags,
+          chosenSource: 'merged',
+          reason: 'union of both tag sets'
+        });
+        continue;
+      }
+
+      if (localIsDefault && !remoteIsDefault) {
+        (merged as any)[field] = remoteValue;
+        mergedFields.push(`${field} (from remote)`);
+        fieldDetails.push({
+          field,
+          localValue,
+          remoteValue,
+          chosenValue: remoteValue,
+          chosenSource: 'remote',
+          reason: 'remote has value, local is default'
+        });
+      } else if (!localIsDefault && remoteIsDefault) {
+        mergedFields.push(`${field} (from local)`);
+        fieldDetails.push({
+          field,
+          localValue,
+          remoteValue,
+          chosenValue: localValue,
+          chosenSource: 'local',
+          reason: 'local has value, remote is default'
+        });
+      } else if (isRemoteNewer) {
+        (merged as any)[field] = remoteValue;
+        conflictedFields.push(field);
+        fieldDetails.push({
+          field,
+          localValue,
+          remoteValue,
+          chosenValue: remoteValue,
+          chosenSource: 'remote',
+          reason: `remote is newer (${remoteItem.updatedAt})`
+        });
+      } else {
+        conflictedFields.push(field);
+        fieldDetails.push({
+          field,
+          localValue,
+          remoteValue,
+          chosenValue: localValue,
+          chosenSource: 'local',
+          reason: `local is newer (${localItem.updatedAt})`
+        });
+      }
+    }
+  }
+
+  merged.updatedAt = isRemoteNewer ? remoteItem.updatedAt : localItem.updatedAt;
+  merged.createdAt = localItem.createdAt;
+
+  const conflictMessages: string[] = [];
+  if (conflictedFields.length > 0) {
+    conflictMessages.push(
+      `${remoteItem.id}: Conflicting fields [${conflictedFields.join(', ')}] resolved using ${isRemoteNewer ? 'remote' : 'local'} values (${isRemoteNewer ? 'remote' : 'local'}: ${isRemoteNewer ? remoteItem.updatedAt : localItem.updatedAt}, ${isRemoteNewer ? 'local' : 'remote'}: ${isRemoteNewer ? localItem.updatedAt : remoteItem.updatedAt})`
+    );
+  }
+  if (mergedFields.length > 0) {
+    conflictMessages.push(`${remoteItem.id}: Merged fields [${mergedFields.join(', ')}]`);
+  }
+
+  const conflictDetail = fieldDetails.length > 0
+    ? {
+      itemId: remoteItem.id,
+      conflictType: 'different-timestamp' as const,
+      fields: fieldDetails,
+      localUpdatedAt: localItem.updatedAt,
+      remoteUpdatedAt: remoteItem.updatedAt
+    }
+    : null;
+
+  return { merged, conflictMessages, conflictDetail };
 }
 
 /**

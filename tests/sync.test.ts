@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { mergeWorkItems, mergeComments } from '../src/sync.js';
+import { isDefaultValue } from '../src/sync/merge-utils.js';
 import { WorklogDatabase } from '../src/database.js';
 
 // Only imported for unit testing the ref-name mapping.
@@ -436,6 +437,56 @@ describe('Sync Operations', () => {
       expect(result.conflicts.some(c => c.includes('Same updatedAt'))).toBe(true);
     });
 
+    it('should prefer lexicographic tie-breaker by default', () => {
+      const localItem: WorkItem = {
+        id: 'WI-001',
+        title: 'Task',
+        description: 'alpha',
+        status: 'open',
+        priority: 'medium',
+        sortIndex: 0,
+        parentId: null,
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T10:00:00.000Z',
+        tags: [],
+        assignee: '',
+        stage: '',
+        issueType: '',
+        createdBy: '',
+        deletedBy: '',
+        deleteReason: '',
+        risk: '' as const,
+        effort: '' as const,
+      };
+
+      const remoteItem: WorkItem = {
+        id: 'WI-001',
+        title: 'Task',
+        description: 'zulu',
+        status: 'open',
+        priority: 'medium',
+        sortIndex: 0,
+        parentId: null,
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T10:00:00.000Z',
+        tags: [],
+        assignee: '',
+        stage: '',
+        issueType: '',
+        createdBy: '',
+        deletedBy: '',
+        deleteReason: '',
+        risk: '' as const,
+        effort: '' as const,
+      };
+
+      const result = mergeWorkItems([localItem], [remoteItem]);
+
+      expect(result.merged).toHaveLength(1);
+      expect(result.merged[0].description).toBe('zulu');
+      expect(result.conflicts.some(c => c.includes('Same updatedAt'))).toBe(true);
+    });
+
     it('should preserve createdAt from local item', () => {
       const localItem: WorkItem = {
         id: 'WI-001',
@@ -588,6 +639,15 @@ describe('Sync Operations', () => {
       // WI-003 should be added (remote only)
       const item3 = result.merged.find(i => i.id === 'WI-003');
       expect(item3?.title).toBe('Remote only');
+    });
+  });
+
+  describe('merge utils', () => {
+    it('treats empty values as defaults unless configured otherwise', () => {
+      expect(isDefaultValue('', 'title')).toBe(true);
+      expect(isDefaultValue([], 'tags')).toBe(true);
+      expect(isDefaultValue('', 'issueType')).toBe(true);
+      expect(isDefaultValue('', 'issueType', { defaultValueFields: ['issueType'] })).toBe(false);
     });
   });
 

@@ -8,40 +8,40 @@ describe('tui persistence', () => {
 
   beforeEach(() => {
     fsMock = {
-      existsSync: vi.fn().mockReturnValue(false),
-      readFileSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      mkdirSync: vi.fn(),
+      access: vi.fn().mockRejectedValue(new Error('missing')),
+      readFile: vi.fn(),
+      writeFile: vi.fn(),
+      mkdir: vi.fn(),
     };
   });
 
-  it('returns null when file missing', () => {
+  it('returns null when file missing', async () => {
     const p = createPersistence(worklogDir, { fs: fsMock });
-    const v = p.loadPersistedState('prefix');
+    const v = await p.loadPersistedState('prefix');
     expect(v).toBeNull();
   });
 
-  it('loads JSON when present', () => {
-    fsMock.existsSync = vi.fn().mockImplementation((p: string) => true);
-    fsMock.readFileSync = vi.fn().mockReturnValue('{"default": {"expanded": ["a"]}}');
+  it('loads JSON when present', async () => {
+    fsMock.access = vi.fn().mockResolvedValue(undefined);
+    fsMock.readFile = vi.fn().mockResolvedValue('{"default": {"expanded": ["a"]}}');
     const p = createPersistence(worklogDir, { fs: fsMock });
-    const v = p.loadPersistedState(undefined);
+    const v = await p.loadPersistedState(undefined);
     expect(v).toEqual({ expanded: ['a'] });
   });
 
-  it('saves state and creates dir when needed', () => {
-    fsMock.existsSync = vi.fn().mockImplementation((p: string) => false);
+  it('saves state and creates dir when needed', async () => {
+    fsMock.access = vi.fn().mockRejectedValue(new Error('missing'));
     const p = createPersistence(worklogDir, { fs: fsMock });
-    p.savePersistedState('prefix', { expanded: ['x'] });
-    expect(fsMock.mkdirSync).toHaveBeenCalled();
-    expect(fsMock.writeFileSync).toHaveBeenCalled();
+    await p.savePersistedState('prefix', { expanded: ['x'] });
+    expect(fsMock.mkdir).toHaveBeenCalled();
+    expect(fsMock.writeFile).toHaveBeenCalled();
   });
 
-  it('handles corrupt json gracefully', () => {
-    fsMock.existsSync = vi.fn().mockImplementation((p: string) => true);
-    fsMock.readFileSync = vi.fn().mockReturnValue('not-json');
+  it('handles corrupt json gracefully', async () => {
+    fsMock.access = vi.fn().mockResolvedValue(undefined);
+    fsMock.readFile = vi.fn().mockResolvedValue('not-json');
     const p = createPersistence(worklogDir, { fs: fsMock });
-    const v = p.loadPersistedState(undefined);
+    const v = await p.loadPersistedState(undefined);
     expect(v).toBeNull();
   });
 });

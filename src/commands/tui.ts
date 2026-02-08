@@ -30,7 +30,7 @@ export default function register(ctx: PluginContext): void {
     .option('--in-progress', 'Show only in-progress items')
     .option('--all', 'Include completed/deleted items in the list')
     .option('--prefix <prefix>', 'Override the default prefix')
-    .action((options: { inProgress?: boolean; prefix?: string; all?: boolean }) => {
-      controller.start(options);
+    .action(async (options: { inProgress?: boolean; prefix?: string; all?: boolean }) => {
+      await controller.start(options);
     });
 }

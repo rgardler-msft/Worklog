@@ -61,7 +61,7 @@ const makeClient = (httpImpl: any, persistedState: any) => {
 describe('OpencodeClient session selection', () => {
   it('prefers the current session when ids match', async () => {
     const httpImpl = makeHttpMock({});
-    const persistedState = { load: () => ({}), save: vi.fn(), getPrefix: () => undefined };
+    const persistedState = { load: async () => ({}), save: vi.fn().mockResolvedValue(undefined), getPrefix: () => undefined };
     const client = makeClient(httpImpl as any, persistedState);
 
     (client as any).currentSessionId = 'WL-123';
@@ -75,8 +75,8 @@ describe('OpencodeClient session selection', () => {
       'GET /session/:id': () => ({ statusCode: 200, body: '' }),
     });
     const persistedState = {
-      load: () => ({ sessionMap: { 'WL-1': 'sess-1' } }),
-      save: vi.fn(),
+      load: async () => ({ sessionMap: { 'WL-1': 'sess-1' } }),
+      save: vi.fn().mockResolvedValue(undefined),
       getPrefix: () => undefined,
     };
     const client = makeClient(httpImpl as any, persistedState);
@@ -94,8 +94,8 @@ describe('OpencodeClient session selection', () => {
       }),
     });
     const persistedState = {
-      load: () => ({ sessionMap: { 'WL-1': 'stale' } }),
-      save: vi.fn(),
+      load: async () => ({ sessionMap: { 'WL-1': 'stale' } }),
+      save: vi.fn().mockResolvedValue(undefined),
       getPrefix: () => undefined,
     };
     const client = makeClient(httpImpl as any, persistedState);
@@ -113,7 +113,7 @@ describe('OpencodeClient session selection', () => {
         body: JSON.stringify({ id: 'sess-3', title: 'workitem:WL-1 TUI Session' }),
       }),
     });
-    const persistedState = { load: () => ({}), save: vi.fn(), getPrefix: () => undefined };
+    const persistedState = { load: async () => ({}), save: vi.fn().mockResolvedValue(undefined), getPrefix: () => undefined };
     const client = makeClient(httpImpl as any, persistedState);
 
     const result = await (client as any).createSession('WL-1');

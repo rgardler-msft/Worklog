@@ -92,7 +92,7 @@ describe("TUI '/' search/filter", () => {
     register(ctx);
 
     // simulate running command
-    program.parse(['tui'], { from: 'user' });
+    await program.parseAsync(['tui'], { from: 'user' });
 
     // Find the screen.key registration for '/'
     // We can't easily invoke the internal key handler, but ensure module loads without error
@@ -126,7 +126,7 @@ describe("TUI '/' search/filter", () => {
 
     const register = (await import('../../src/commands/tui.js')).default;
     register(ctx);
-    program.parse(['tui'], { from: 'user' });
+    await program.parseAsync(['tui'], { from: 'user' });
 
     // Trigger the '/' key handler registered on the screen
     const screen = (blessedImpl.screen as any)();

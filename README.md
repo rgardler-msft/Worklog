@@ -26,23 +26,22 @@ A simple experimental issue tracker for AI agents. This is a lightweight worklog
 ```bash
 npm install
 npm run build
+npm link
 ```
 
-### As a Global CLI Tool
+With this setup, you can use the `worklog` or `wl` commands globally while developing. Changes to the code will require a rebuild (`npm run build`) to take effect.
+
+### Global CLI (Production)
 
 To install the CLI globally so you can use `worklog` or `wl` commands from anywhere:
 
 ```bash
+npm install
+npm run build
 npm install -g .
 ```
 
-Or, for local development with live updates:
-
-```bash
-npm link
-```
-
-This will make the `worklog` and `wl` commands available globally.
+This will make the `worklog` and `wl` commands available globally on your system. Changes to the code will require a rebuild and reinstallation to take effect.
 
 ## QUICKSTART
 
@@ -50,13 +49,13 @@ This will make the `worklog` and `wl` commands available globally.
 wl init     # Initialize your project to use Worklog (installs AGENTS.md when consented)
 ```
 
-That's it. Just use your agents as you normally would. They will start using Worklog to plan and track their work. You can use the CLI to review the state of the project and add or edit work-items manually if you so desire (use `wl help`). You can also use `wl github import` and `wl github push` to bi-directionally sync work-items with Github issues, giving you and your communit a convenient way to interact if you don't like CLIs.
+That's it. Just use your agents as you normally would. They will start using Worklog to plan and track their work. You can use the CLI to review the state of the project and add or edit work items manually if you so desire (use `wl help`). You can also use `wl github import` and `wl github push` to bidirectionally sync work items with GitHub issues, giving you and your community a convenient way to interact if you don't like CLIs.
 
-### Is that REALY it?
+### Is that REALLY it?
 
-You can get alot of value from just using Worklog as a memory for your agents. But you can go much further by building a personal workflow to manage the agents work. We believe that everyone is unique. Our workflows should be optimized for ourselves, our teams and our environments. Consequently Worklog brings the bare minimum workflow with it. It is installed when you run `wl init` (unless you said no to the AGENTS.md update during initialization, you can run it again if you want to add it later).
+You can get a lot of value from just using Worklog as a memory for your agents. But you can go much further by building a personal workflow to manage the agents' work. We believe that everyone is unique. Our workflows should be optimized for ourselves, our teams and our environments. Consequently Worklog brings the bare minimum workflow with it. It is installed when you run `wl init` (unless you said no to the AGENTS.md update during initialization, you can run it again if you want to add it later).
 
-If you want to define your own workflow then you might take inspiration from the [Sorra Agents Repository](https://github.com/sorratheorc/sorraagents) which is a very complete workflow that leverages Worklog and a number of customer commands, skills and agents.
+If you want to define your own workflow then you might take inspiration from the [Sorra Agents Repository](https://github.com/sorratheorc/sorraagents) which is a very complete workflow that leverages Worklog and a number of custom commands, skills and agents.
 
 ## Configuration
 
@@ -338,12 +337,14 @@ wl tui --in-progress  # show only in-progress items
 ## Key Features
 
 ### Work Item Management
+
 - Browse work items in a hierarchical tree view
 - Create, edit, and close work items
 - Add comments and view details
 - Navigate with keyboard shortcuts or mouse
 
 ### OpenCode AI Integration
+
 Press `O` (capital O) to access the built-in OpenCode AI assistant:
 
 - **Auto-start Server**: OpenCode server starts automatically when needed
@@ -353,6 +354,7 @@ Press `O` (capital O) to access the built-in OpenCode AI assistant:
 - **Session Persistence**: Maintain context across multiple prompts
 
 Quick OpenCode example:
+
 ```
 Press O → Type "What work items need attention?" → Press Ctrl+S
 ```

@@ -376,9 +376,16 @@ export class SqlitePersistentStore {
    * Delete a work item
    */
   deleteWorkItem(id: string): boolean {
-    const stmt = this.db.prepare('DELETE FROM workitems WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    const deleteTransaction = this.db.transaction(() => {
+      const result = this.db.prepare('DELETE FROM workitems WHERE id = ?').run(id);
+      if (result.changes === 0) {
+        return false;
+      }
+      this.db.prepare('DELETE FROM dependency_edges WHERE fromId = ? OR toId = ?').run(id, id);
+      this.db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
+      return true;
+    });
+    return deleteTransaction();
   }
 
   /**
@@ -535,6 +542,15 @@ export class SqlitePersistentStore {
     const stmt = this.db.prepare('SELECT * FROM dependency_edges WHERE toId = ?');
     const rows = stmt.all(toId) as any[];
     return rows.map(row => this.rowToDependencyEdge(row));
+  }
+
+  /**
+   * Remove all dependency edges for a work item
+   */
+  deleteDependencyEdgesForItem(itemId: string): number {
+    const stmt = this.db.prepare('DELETE FROM dependency_edges WHERE fromId = ? OR toId = ?');
+    const result = stmt.run(itemId, itemId);
+    return result.changes;
   }
 
   /**

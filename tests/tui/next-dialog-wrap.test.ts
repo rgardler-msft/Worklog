@@ -163,7 +163,7 @@ describe('next dialog text wrapping', () => {
     const register = (await import('../../src/commands/tui.js')).default;
     register(ctx);
 
-    program.parse(['tui'], { from: 'user' });
+    await program.parseAsync(['tui'], { from: 'user' });
 
     const nextDialogTextCall = blessedImpl.box.mock.calls.find(
       (call) => call[0]?.content === 'Evaluating next work item...'

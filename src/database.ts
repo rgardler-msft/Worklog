@@ -124,7 +124,8 @@ export class WorklogDatabase {
         const itemMergeResult = mergeWorkItems(items, diskItems);
         const commentMergeResult = mergeComments(comments, diskComments);
         itemsToExport = itemMergeResult.merged;
-        commentsToExport = commentMergeResult.merged;
+        const localCommentIds = new Set(comments.map(comment => comment.id));
+        commentsToExport = commentMergeResult.merged.filter(comment => localCommentIds.has(comment.id));
       } catch (error) {
         if (!this.silent) {
           const message = error instanceof Error ? error.message : String(error);
@@ -1048,6 +1049,10 @@ export class WorklogDatabase {
     return this.store.getAllWorkItemsOrderedByHierarchySortIndex();
   }
 
+  getAllOrderedByScore(recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore'): WorkItem[] {
+    return this.sortItemsByScore(this.store.getAllWorkItems(), recencyPolicy);
+  }
+
   /**
    * Import work items (replaces existing data)
    */
@@ -1122,6 +1127,7 @@ export class WorklogDatabase {
    * Create a new comment
    */
   createComment(input: CreateCommentInput): Comment | null {
+    this.refreshFromJsonlIfNewer();
     // Validate required fields
     if (!input.author || input.author.trim() === '') {
       throw new Error('Author is required');
@@ -1171,6 +1177,7 @@ export class WorklogDatabase {
    * Update a comment
    */
   updateComment(id: string, input: UpdateCommentInput): Comment | null {
+    this.refreshFromJsonlIfNewer();
     const comment = this.store.getComment(id);
     if (!comment) {
       return null;
@@ -1195,6 +1202,7 @@ export class WorklogDatabase {
    * Delete a comment
    */
   deleteComment(id: string): boolean {
+     this.refreshFromJsonlIfNewer();
      const comment = this.store.getComment(id);
      if (!comment) {
        return false;

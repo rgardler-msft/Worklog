@@ -27,8 +27,8 @@ export interface ModalDialogsApi {
 }
 
 export interface PersistedStateStore {
-  load(prefix?: string): any;
-  save(prefix: string | undefined, state: any): void;
+  load(prefix?: string): Promise<any>;
+  save(prefix: string | undefined, state: any): Promise<void>;
   getPrefix?: () => string | undefined;
 }
 
@@ -918,44 +918,44 @@ export class OpencodeClient {
     }
   }
 
-  private getPersistedSessionIdForWorkItem(workItemId: string): string | null {
+  private async getPersistedSessionIdForWorkItem(workItemId: string): Promise<string | null> {
     try {
-      const persisted = this.options.persistedState.load(this.options.persistedState.getPrefix?.() || undefined) || {};
+      const persisted = await this.options.persistedState.load(this.options.persistedState.getPrefix?.() || undefined) || {};
       return persisted.sessionMap && persisted.sessionMap[workItemId] ? persisted.sessionMap[workItemId] : null;
     } catch (_) {
       return null;
     }
   }
 
-  private persistSessionMapping(workItemId: string, sessionId: string) {
+  private async persistSessionMapping(workItemId: string, sessionId: string): Promise<void> {
     try {
       const prefix = this.options.persistedState.getPrefix?.();
-      const state = this.options.persistedState.load(prefix) || {};
+      const state = await this.options.persistedState.load(prefix) || {};
       state.sessionMap = state.sessionMap || {};
       state.sessionMap[workItemId] = sessionId;
-      this.options.persistedState.save(prefix, state);
+      await this.options.persistedState.save(prefix, state);
       this.options.log(`persistSessionMapping workitem=${workItemId} -> session=${sessionId}`);
     } catch (err) {
       this.options.log(`failed to persist session mapping: ${String(err)}`);
     }
   }
 
-  private persistSessionHistory(workItemId: string, history: any[]) {
+  private async persistSessionHistory(workItemId: string, history: any[]): Promise<void> {
     try {
       const prefix = this.options.persistedState.getPrefix?.();
-      const state = this.options.persistedState.load(prefix) || {};
+      const state = await this.options.persistedState.load(prefix) || {};
       state.sessionHistories = state.sessionHistories || {};
       state.sessionHistories[workItemId] = history;
-      this.options.persistedState.save(prefix, state);
+      await this.options.persistedState.save(prefix, state);
       this.options.log(`persistSessionHistory workitem=${workItemId} messages=${(history || []).length}`);
     } catch (err) {
       this.options.log(`failed to persist session history: ${String(err)}`);
     }
   }
 
-  private loadPersistedSessionHistory(workItemId: string): any[] | null {
+  private async loadPersistedSessionHistory(workItemId: string): Promise<any[] | null> {
     try {
-      const persisted = this.options.persistedState.load(this.options.persistedState.getPrefix?.() || undefined) || {};
+      const persisted = await this.options.persistedState.load(this.options.persistedState.getPrefix?.() || undefined) || {};
       return persisted.sessionHistories && persisted.sessionHistories[workItemId] ? persisted.sessionHistories[workItemId] : null;
     } catch (_) {
       return null;
@@ -1092,14 +1092,14 @@ export class OpencodeClient {
 
     try {
       if (preferredId) {
-        const persistedId = this.getPersistedSessionIdForWorkItem(preferredId);
+        const persistedId = await this.getPersistedSessionIdForWorkItem(preferredId);
         if (persistedId) {
           const exists = await this.checkSessionExists(persistedId);
           if (exists) {
             this.options.log(`reusing persisted session mapping for workitem=${preferredId} id=${persistedId}`);
             return { id: persistedId, workItemId: preferredId, existing: true };
           }
-          const persistedHistory = this.loadPersistedSessionHistory(preferredId);
+          const persistedHistory = await this.loadPersistedSessionHistory(preferredId);
           if (persistedHistory) {
             this.options.log(`found ${persistedHistory.length} persisted messages for workitem=${preferredId} (will NOT auto-replay)`);
           }
@@ -1108,7 +1108,7 @@ export class OpencodeClient {
         const existing = await this.findSessionByTitle(preferredId);
         if (existing) {
           this.options.log(`found existing session for workitem=${preferredId} id=${existing}`);
-          this.persistSessionMapping(preferredId, existing);
+          void this.persistSessionMapping(preferredId, existing);
           return { id: existing, workItemId: preferredId, existing: true };
         }
       }
@@ -1161,17 +1161,17 @@ export class OpencodeClient {
         if (m) returnedWorkItemId = m[1];
       }
       if (preferredId && returnedId) {
-        this.persistSessionMapping(preferredId, returnedId);
+        void this.persistSessionMapping(preferredId, returnedId);
       }
 
       try {
         const fetched = returnedId ? await this.getSessionMessages(returnedId as string) : null;
-        if (preferredId && fetched && fetched.length > 0) this.persistSessionHistory(preferredId, fetched);
+        if (preferredId && fetched && fetched.length > 0) void this.persistSessionHistory(preferredId, fetched);
       } catch (_) {
         // ignore
       }
 
-      const localHistory = preferredId ? this.loadPersistedSessionHistory(preferredId) : null;
+      const localHistory = preferredId ? await this.loadPersistedSessionHistory(preferredId) : null;
 
       return { id: returnedId as string, workItemId: returnedWorkItemId || preferredId || null, localHistory };
     } catch (err) {

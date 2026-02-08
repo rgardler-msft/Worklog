@@ -57,6 +57,12 @@ The Worklog TUI now includes full integration with OpenCode, an AI-powered codin
 - User responses are shown in cyan in the conversation
 - Press Escape to cancel input mode
 
+### 7. Prompt Input Auto-Resize
+
+- The prompt input box grows as long lines wrap within the terminal
+- Auto-resize caps at a maximum height; beyond that, the input scrolls
+- Manual resize via `Ctrl+Enter` still works when adding explicit newlines
+
 ## Usage
 
 ### Starting a Conversation

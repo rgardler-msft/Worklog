@@ -63,7 +63,7 @@ const makeScreen = () => {
 };
 
 describe('TuiController', () => {
-  it('starts with injected deps and layout', () => {
+  it('starts with injected deps and layout', async () => {
     const screen = makeScreen();
     const list = makeList();
     const footer = makeBox();
@@ -183,13 +183,13 @@ describe('TuiController', () => {
       OpencodeClient: FakeOpencodeClient as any,
       resolveWorklogDir: () => '/tmp',
       createPersistence: () => ({
-        loadPersistedState: () => null,
-        savePersistedState: () => undefined,
+        loadPersistedState: async () => null,
+        savePersistedState: async () => undefined,
         statePath: '/tmp/tui-state.json',
       }),
     });
 
-    controller.start({});
+    await controller.start({});
 
     expect(createLayout).toHaveBeenCalled();
     expect(opencodeCtorCalls.length).toBe(1);

@@ -112,30 +112,30 @@ function renderTitleTUI(item: WorkItem, prefix: string = ''): string {
  * to the human formatter and keeps `list` and `show` outputs consistent.
  */
 export function displayItemTree(items: WorkItem[]): void {
-  const itemIds = new Set(items.map(i => i.id));
-  
-  let rootItems = items.filter(item => {
-    if (item.parentId === null) return true;
-    return !itemIds.has(item.parentId);
-  });
-  
-  rootItems.sort(sortByPriorityAndDate);
-  
-  rootItems.forEach((item, index) => {
-    const isLastItem = index === rootItems.length - 1;
-    displayItemNode(item, items, '', isLastItem);
+  walkItemTree(items, {
+    sortRootItems: list => list.slice().sort(sortByPriorityAndDate),
+    sortChildItems: list => list.slice().sort(sortByPriorityDateAndId),
+    render: (item, { indent, isLast, inheritedStage }) => {
+      const prefix = indent + (isLast ? '└── ' : '├── ');
+      console.log(formatTitleAndId(item, prefix));
+
+      const detailIndent = indent + (isLast ? '    ' : '│   ');
+      const effectiveStage = item.stage ?? inheritedStage;
+      const statusSummary = effectiveStage
+        ? `Status: ${item.status} · Stage: ${effectiveStage} | Priority: ${item.priority}`
+        : `Status: ${item.status} | Priority: ${item.priority}`;
+      console.log(`${detailIndent}${statusSummary}`);
+      if (item.risk) console.log(`${detailIndent}Risk: ${item.risk}`);
+      if (item.effort) console.log(`${detailIndent}Effort: ${item.effort}`);
+      if (item.assignee) console.log(`${detailIndent}Assignee: ${item.assignee}`);
+      if (item.tags.length > 0) console.log(`${detailIndent}Tags: ${item.tags.join(', ')}`);
+    }
   });
 }
 
 // Display work items using the human formatter but preserve tree hierarchy
 export function displayItemTreeWithFormat(items: WorkItem[], db: WorklogDatabase | null, format: string): void {
   const itemIds = new Set(items.map(i => i.id));
-
-  let rootItems = items.filter(item => {
-    if (item.parentId === null) return true;
-    return !itemIds.has(item.parentId);
-  });
-
   const orderedItems = db
     ? db.getAllOrderedByHierarchySortIndex().filter(item => itemIds.has(item.id))
     : null;
@@ -159,67 +159,75 @@ export function displayItemTreeWithFormat(items: WorkItem[], db: WorklogDatabase
       });
   };
 
-  rootItems = sortChildren(rootItems);
+  walkItemTree(items, {
+    sortRootItems: sortChildren,
+    sortChildItems: sortChildren,
+    render: (item, { indent, isLast, inheritedStage }) => {
+      const prefix = indent + (isLast ? '└── ' : '├── ');
+      const detailIndent = indent + (isLast ? '    ' : '│   ');
 
-  const displayNode = (item: WorkItem, allItems: WorkItem[], indent: string, isLast: boolean, inheritedStage?: string) => {
-    const prefix = indent + (isLast ? '└── ' : '├── ');
+      // If the item doesn't have an explicit stage, fall back to an inherited stage
+      const displayItem = Object.assign({}, item, { stage: item.stage ?? inheritedStage });
+      // Normalize empty-string stage to explicit empty so downstream logic can detect it
+      if (displayItem.stage === '') {
+        // keep as empty string to signal 'Undefined' label
+      }
+      const formatted = humanFormatWorkItem(displayItem, db, format);
+      const lines = formatted.split('\n');
+      // First line gets the tree marker prefix
+      console.log(prefix + lines[0]);
+      // Subsequent lines align under the detail indent
+      for (let i = 1; i < lines.length; i++) {
+        console.log(detailIndent + lines[i]);
+      }
+    }
+  });
+}
+
+type TreeRenderContext = {
+  indent: string;
+  isLast: boolean;
+  inheritedStage?: string;
+};
+
+type TreeRenderOptions = {
+  sortRootItems: (items: WorkItem[]) => WorkItem[];
+  sortChildItems: (items: WorkItem[]) => WorkItem[];
+  render: (item: WorkItem, context: TreeRenderContext) => void;
+};
+
+function walkItemTree(items: WorkItem[], options: TreeRenderOptions): void {
+  const itemIds = new Set(items.map(item => item.id));
+  const childrenByParent = new Map<string | null, WorkItem[]>();
+
+  for (const item of items) {
+    const parentKey = item.parentId && itemIds.has(item.parentId) ? item.parentId : null;
+    const list = childrenByParent.get(parentKey) ?? [];
+    list.push(item);
+    childrenByParent.set(parentKey, list);
+  }
+
+  const rootItems = options.sortRootItems(childrenByParent.get(null) ?? []);
+
+  const visit = (item: WorkItem, indent: string, isLast: boolean, inheritedStage?: string) => {
+    options.render(item, { indent, isLast, inheritedStage });
+
     const detailIndent = indent + (isLast ? '    ' : '│   ');
+    const effectiveStage = item.stage ?? inheritedStage;
+    const children = childrenByParent.get(item.id);
+    if (!children || children.length === 0) return;
 
-    // If the item doesn't have an explicit stage, fall back to an inherited stage
-    const displayItem = Object.assign({}, item, { stage: item.stage ?? inheritedStage });
-    // Normalize empty-string stage to explicit empty so downstream logic can detect it
-    if (displayItem.stage === '') {
-      // keep as empty string to signal 'Undefined' label
-    }
-    const formatted = humanFormatWorkItem(displayItem, db, format);
-    const lines = formatted.split('\n');
-    // First line gets the tree marker prefix
-    console.log(prefix + lines[0]);
-    // Subsequent lines align under the detail indent
-    for (let i = 1; i < lines.length; i++) {
-      console.log(detailIndent + lines[i]);
-    }
-
-    const children = allItems.filter(i => i.parentId === item.id);
-    if (children.length > 0) {
-      const orderedChildren = sortChildren(children);
-      orderedChildren.forEach((child, idx) => {
-        const last = idx === orderedChildren.length - 1;
-        displayNode(child, allItems, detailIndent, last, displayItem.stage);
-      });
-    }
+    const orderedChildren = options.sortChildItems(children);
+    orderedChildren.forEach((child, index) => {
+      const last = index === orderedChildren.length - 1;
+      visit(child, detailIndent, last, effectiveStage);
+    });
   };
 
   rootItems.forEach((item, index) => {
     const isLastItem = index === rootItems.length - 1;
-    displayNode(item, items, '', isLastItem, undefined);
+    visit(item, '', isLastItem, undefined);
   });
-}
-
-function displayItemNode(item: WorkItem, allItems: WorkItem[], indent: string = '', isLast: boolean = true, inheritedStage?: string): void {
-  const prefix = indent + (isLast ? '└── ' : '├── ');
-  console.log(formatTitleAndId(item, prefix));
-  
-  const detailIndent = indent + (isLast ? '    ' : '│   ');
-  const effectiveStage = item.stage ?? inheritedStage;
-  const statusSummary = effectiveStage
-    ? `Status: ${item.status} · Stage: ${effectiveStage} | Priority: ${item.priority}`
-    : `Status: ${item.status} | Priority: ${item.priority}`;
-  console.log(`${detailIndent}${statusSummary}`);
-  if (item.risk) console.log(`${detailIndent}Risk: ${item.risk}`);
-  if (item.effort) console.log(`${detailIndent}Effort: ${item.effort}`);
-  if (item.assignee) console.log(`${detailIndent}Assignee: ${item.assignee}`);
-  if (item.tags.length > 0) console.log(`${detailIndent}Tags: ${item.tags.join(', ')}`);
-  
-  const children = allItems.filter(i => i.parentId === item.id);
-  if (children.length > 0) {
-    children.sort(sortByPriorityDateAndId);
-    
-    children.forEach((child, childIndex) => {
-      const isLastChild = childIndex === children.length - 1;
-      displayItemNode(child, allItems, detailIndent, isLastChild, effectiveStage);
-    });
-  }
 }
 
 // Standard human formatter: supports 'concise' | 'normal' | 'full' | 'raw'

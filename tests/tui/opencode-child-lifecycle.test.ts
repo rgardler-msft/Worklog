@@ -35,7 +35,7 @@ describe('OpencodeClient child process lifecycle', () => {
       showToast: () => {},
       modalDialogs: { selectList: async () => null, editTextarea: async () => null, confirmTextbox: async () => true },
       render: () => {},
-      persistedState: { load: () => ({}), save: () => {}, getPrefix: () => undefined },
+      persistedState: { load: async () => ({}), save: async () => {}, getPrefix: () => undefined },
       httpImpl: {} as any,
       spawnImpl,
     } as any);

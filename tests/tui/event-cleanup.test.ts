@@ -49,7 +49,7 @@ describe('OpencodeClient SSE cleanup', () => {
         confirmTextbox: async () => true,
       },
       render: () => {},
-      persistedState: { load: () => ({}), save: () => {}, getPrefix: () => undefined },
+      persistedState: { load: async () => ({}), save: async () => {}, getPrefix: () => undefined },
       httpImpl: httpImpl,
       spawnImpl: (name: string) => { throw new Error('not used'); },
     } as any);

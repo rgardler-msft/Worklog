@@ -86,6 +86,7 @@ export interface ResortOptions {
   dryRun?: boolean;
   gap?: string;
   prefix?: string;
+  recency?: string;
 }
 
 export interface SyncOptions {
