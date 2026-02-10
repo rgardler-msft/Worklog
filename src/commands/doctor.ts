@@ -15,12 +15,86 @@ interface DoctorOptions {
 export default function register(ctx: PluginContext): void {
   const { program, output, utils } = ctx;
 
-  program
+  const doctor = program
     .command('doctor')
     .description('Validate work items against status/stage config rules')
     .option('--fix', 'Apply safe fixes and prompt for non-safe findings')
+    .option('--prefix <prefix>', 'Override the default prefix');
+
+  doctor
+    .command('upgrade')
+    .description('Preview or apply pending database schema migrations')
+    .option('--dry-run', 'Preview pending migrations without applying them')
+    .option('--confirm', 'Apply pending migrations (non-interactive)')
     .option('--prefix <prefix>', 'Override the default prefix')
-  .action(async (options: DoctorOptions & { fix?: boolean }) => {
+    .action(async (opts: { dryRun?: boolean; confirm?: boolean; prefix?: string }) => {
+      // Migration upgrade subcommand
+      utils.requireInitialized();
+      try {
+        const pending = listPendingMigrations();
+        if (!pending || pending.length === 0) {
+          if (utils.isJsonMode()) {
+            output.json({ success: true, pending: [] });
+            return;
+          }
+          console.log('Doctor: no pending migrations.');
+          return;
+        }
+
+        if (opts.dryRun) {
+          if (utils.isJsonMode()) {
+            output.json({ success: true, dryRun: true, pending });
+            return;
+          }
+          console.log('Pending migrations:');
+          pending.forEach(p => console.log(` - ${p.id}: ${p.description} (safe=${p.safe})`));
+          return;
+        }
+
+        // Confirm before applying unless --confirm provided
+        let proceed = Boolean(opts.confirm);
+        if (!proceed) {
+          // Prompt interactively
+          const readlineMod = await import('node:readline');
+          const answer = await new Promise<boolean>(resolve => {
+            const rl = readlineMod.createInterface({ input: process.stdin, output: process.stdout });
+            rl.question(`Apply ${pending.length} pending migration(s)? (y/N): `, (a: string) => {
+              rl.close();
+              const v = (a || '').trim().toLowerCase();
+              resolve(v === 'y' || v === 'yes');
+            });
+          });
+          proceed = answer;
+        }
+
+        if (!proceed) {
+          if (utils.isJsonMode()) output.json({ success: false, message: 'User declined to apply migrations' });
+          else console.log('Aborted: migrations not applied.');
+          return;
+        }
+
+        // Apply migrations
+        try {
+          const result = runMigrations({ dryRun: false, confirm: true, logger: { info: s => console.error(s), error: s => console.error(s) } });
+          if (utils.isJsonMode()) {
+            output.json({ success: true, applied: result.applied, backups: result.backups });
+            return;
+          }
+          console.log(`Applied migrations: ${result.applied.map(a => a.id).join(', ')}`);
+          if (result.backups && result.backups.length > 0) console.log(`Backups: ${result.backups.join(', ')}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (utils.isJsonMode()) output.json({ success: false, error: message });
+          else console.error(`Migration failed: ${message}`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (utils.isJsonMode()) output.json({ success: false, error: message });
+        else console.error(`Doctor upgrade failed: ${message}`);
+      }
+    });
+
+  doctor.action(async (options: DoctorOptions & { fix?: boolean }) => {
       utils.requireInitialized();
       const db = utils.getDatabase(options.prefix);
       const items = db.getAll();
@@ -58,33 +132,7 @@ export default function register(ctx: PluginContext): void {
         findings = await applyDoctorFixes(db, findings, promptFn);
       }
 
-      // Support `doctor upgrade` as a convenience under doctor when --fix provided
-      // (we only handle preview/confirm here via --fix && options.prefix)
-      // Note: full CLI command is `wl doctor upgrade` but providing this here keeps doctor flow simple.
-      // If user passed --upgrade we would trigger migrations. For now expose `WL_DO_UPGRADE` env for tests.
-      const doUpgrade = process.env.WL_DO_UPGRADE === '1';
-      if (doUpgrade) {
-        try {
-          const pending = listPendingMigrations();
-          if (pending.length === 0) {
-            console.log('No pending migrations.');
-          } else {
-            console.log('Pending migrations:');
-            for (const p of pending) console.log(` - ${p.id}: ${p.description} (safe=${p.safe})`);
-            const confirm = process.env.WL_DO_UPGRADE_CONFIRM === '1';
-            if (confirm) {
-              const result = runMigrations({ dryRun: false, confirm: true, logger: { info: s => console.error(s), error: s => console.error(s) } });
-              console.log(`Applied migrations: ${result.applied.map(a => a.id).join(', ')}`);
-              console.log(`Backups: ${result.backups.join(', ')}`);
-            } else {
-              console.log('Run with WL_DO_UPGRADE_CONFIRM=1 to apply.');
-            }
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`Migration failed: ${message}`);
-        }
-      }
+      // Human-readable output handled below
 
       if (utils.isJsonMode()) {
         output.json(findings);
