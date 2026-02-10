@@ -340,7 +340,7 @@ export class WorklogDatabase {
     const id = this.generateId();
     const now = new Date().toISOString();
     
-    const item: WorkItem = {
+      const item: WorkItem = {
       id,
       title: input.title,
       description: input.description || '',
@@ -363,6 +363,8 @@ export class WorklogDatabase {
       githubIssueNumber: undefined,
       githubIssueId: undefined,
       githubIssueUpdatedAt: undefined,
+      // default for the new flag
+      needsProducerReview: false,
     };
 
     this.store.saveWorkItem(item);
@@ -460,7 +462,7 @@ export class WorklogDatabase {
   list(query?: WorkItemQuery): WorkItem[] {
     let items = this.store.getAllWorkItems();
 
-    if (query) {
+      if (query) {
       if (query.status) {
         // Normalize status: convert underscores to hyphens for matching
         // (handles legacy data stored with underscores vs the canonical hyphenated format)
@@ -498,6 +500,9 @@ export class WorklogDatabase {
       }
       if (query.deleteReason) {
         items = items.filter(item => item.deleteReason === query.deleteReason);
+      }
+      if (query.needsProducerReview !== undefined) {
+        items = items.filter(item => Boolean(item.needsProducerReview) === Boolean(query.needsProducerReview));
       }
     }
 

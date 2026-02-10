@@ -181,7 +181,7 @@ export function importFromJsonlContent(content: string): { items: WorkItem[], co
         if ((item as any).githubIssueUpdatedAt === undefined) {
           (item as any).githubIssueUpdatedAt = undefined;
         }
-        if ((item as any).githubIssueNumber !== undefined && (item as any).githubIssueNumber !== null) {
+      if ((item as any).githubIssueNumber !== undefined && (item as any).githubIssueNumber !== null) {
           (item as any).githubIssueNumber = Number((item as any).githubIssueNumber);
         }
         if ((item as any).githubIssueId !== undefined && (item as any).githubIssueId !== null) {
@@ -189,6 +189,11 @@ export function importFromJsonlContent(content: string): { items: WorkItem[], co
         }
         if (item.description) {
           item.description = stripWorklogMarkers(item.description);
+        }
+        // Preserve presence/absence of the new boolean field so round-trip
+        // export/import does not introduce properties that weren't in the source.
+        if ((item as any).needsProducerReview !== undefined) {
+          (item as any).needsProducerReview = Boolean((item as any).needsProducerReview);
         }
         item.dependencies = dependencies;
         items.push(item);

@@ -39,6 +39,8 @@ export interface ListOptions {
   tags?: string;
   assignee?: string;
   stage?: string;
+  /** 'true'|'false'|'yes'|'no' (string form from CLI); parsed to boolean by command */
+  needsProducerReview?: string;
   prefix?: string;
   number?: string;
 }

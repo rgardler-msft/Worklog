@@ -22,6 +22,7 @@ export default function register(ctx: PluginContext): void {
     .option('--tags <tags>', 'Filter by tags (comma-separated)')
     .option('-a, --assignee <assignee>', 'Filter by assignee')
     .option('--stage <stage>', 'Filter by stage')
+    .option('--needs-producer-review <true|false>', 'Filter by needsProducerReview flag (true|false)')
     .option('--prefix <prefix>', 'Override the default prefix')
     .action((search: string | undefined, options: ListOptions) => {
       utils.requireInitialized();
@@ -45,6 +46,18 @@ export default function register(ctx: PluginContext): void {
       }
       if (options.assignee) query.assignee = options.assignee;
       if (options.stage) query.stage = options.stage;
+      if (options.needsProducerReview !== undefined) {
+        // Accept common boolean-like CLI values
+        const raw = String(options.needsProducerReview).toLowerCase();
+        const truthy = ['true', 'yes', '1'];
+        const falsy = ['false', 'no', '0'];
+        if (truthy.includes(raw)) query.needsProducerReview = true;
+        else if (falsy.includes(raw)) query.needsProducerReview = false;
+        else {
+          output.error(`Invalid value for --needs-producer-review: ${options.needsProducerReview}`, { success: false, error: 'invalid-arg' });
+          process.exit(1);
+        }
+      }
       
       let items = db.list(query);
 
