@@ -6,6 +6,7 @@ import type { PluginContext } from '../plugin-types.js';
 import { loadStatusStageRules } from '../status-stage-rules.js';
 import { validateStatusStageItems } from '../doctor/status-stage-check.js';
 import { validateDependencyEdges } from '../doctor/dependency-check.js';
+import { listPendingMigrations, runMigrations } from '../migrations/index.js';
 
 interface DoctorOptions {
   prefix?: string;
@@ -19,7 +20,7 @@ export default function register(ctx: PluginContext): void {
     .description('Validate work items against status/stage config rules')
     .option('--fix', 'Apply safe fixes and prompt for non-safe findings')
     .option('--prefix <prefix>', 'Override the default prefix')
-    .action(async (options: DoctorOptions & { fix?: boolean }) => {
+  .action(async (options: DoctorOptions & { fix?: boolean }) => {
       utils.requireInitialized();
       const db = utils.getDatabase(options.prefix);
       const items = db.getAll();
@@ -55,6 +56,34 @@ export default function register(ctx: PluginContext): void {
           });
         };
         findings = await applyDoctorFixes(db, findings, promptFn);
+      }
+
+      // Support `doctor upgrade` as a convenience under doctor when --fix provided
+      // (we only handle preview/confirm here via --fix && options.prefix)
+      // Note: full CLI command is `wl doctor upgrade` but providing this here keeps doctor flow simple.
+      // If user passed --upgrade we would trigger migrations. For now expose `WL_DO_UPGRADE` env for tests.
+      const doUpgrade = process.env.WL_DO_UPGRADE === '1';
+      if (doUpgrade) {
+        try {
+          const pending = listPendingMigrations();
+          if (pending.length === 0) {
+            console.log('No pending migrations.');
+          } else {
+            console.log('Pending migrations:');
+            for (const p of pending) console.log(` - ${p.id}: ${p.description} (safe=${p.safe})`);
+            const confirm = process.env.WL_DO_UPGRADE_CONFIRM === '1';
+            if (confirm) {
+              const result = runMigrations({ dryRun: false, confirm: true, logger: { info: s => console.error(s), error: s => console.error(s) } });
+              console.log(`Applied migrations: ${result.applied.map(a => a.id).join(', ')}`);
+              console.log(`Backups: ${result.backups.join(', ')}`);
+            } else {
+              console.log('Run with WL_DO_UPGRADE_CONFIRM=1 to apply.');
+            }
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`Migration failed: ${message}`);
+        }
       }
 
       if (utils.isJsonMode()) {
