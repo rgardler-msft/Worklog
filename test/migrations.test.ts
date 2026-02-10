@@ -13,13 +13,18 @@ function ensureTmp() {
 
 describe('migrations runner', () => {
   beforeEach(() => {
-    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    // Ensure test temp directory is fresh for each test
     if (fs.existsSync(tmpDir)) {
-      // clean backups
-      const backups = path.join(tmpDir, 'backups');
-      if (fs.existsSync(backups)) {
-        for (const f of fs.readdirSync(backups)) fs.unlinkSync(path.join(backups, f));
-        fs.rmdirSync(backups);
+      // Remove previous contents
+      for (const f of fs.readdirSync(tmpDir)) {
+        const p = path.join(tmpDir, f);
+        if (fs.lstatSync(p).isDirectory()) {
+          // remove backups dir recursively
+          for (const bf of fs.readdirSync(p)) fs.unlinkSync(path.join(p, bf));
+          fs.rmdirSync(p);
+        } else {
+          fs.unlinkSync(p);
+        }
       }
     }
     ensureTmp();
