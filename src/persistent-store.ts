@@ -129,93 +129,11 @@ export class SqlitePersistentStore {
       }
     }
 
-    // For test environments we preserve the previous behavior and apply
-    // non-destructive ALTERs so the test-suite (which creates DBs programmatically)
-    // continues to operate without requiring a manual migration step. In
-    // production the migration runner should be used instead.
-    if (runningInTest && !isNewDb) {
-      const existingVersion = schemaVersionRaw ? parseInt(schemaVersionRaw, 10) : 1;
-      if (existingVersion < 2) {
-        const cols = this.db.prepare(`PRAGMA table_info('workitems')`).all() as any[];
-        const existingCols = new Set(cols.map(c => String(c.name)));
-        const maybeAdd = (name: string) => {
-          if (!existingCols.has(name)) {
-            this.db.exec(`ALTER TABLE workitems ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`);
-          }
-        };
-        maybeAdd('issueType');
-        maybeAdd('createdBy');
-        maybeAdd('deletedBy');
-        maybeAdd('deleteReason');
-      }
-
-      if (existingVersion < 3) {
-        const cols = this.db.prepare(`PRAGMA table_info('workitems')`).all() as any[];
-        const existingCols = new Set(cols.map(c => String(c.name)));
-        const maybeAddNullable = (name: string) => {
-          if (!existingCols.has(name)) {
-            this.db.exec(`ALTER TABLE workitems ADD COLUMN ${name} TEXT`);
-          }
-        };
-        const maybeAddNullableInt = (name: string) => {
-          if (!existingCols.has(name)) {
-            this.db.exec(`ALTER TABLE workitems ADD COLUMN ${name} INTEGER`);
-          }
-        };
-        maybeAddNullableInt('githubIssueNumber');
-        maybeAddNullableInt('githubIssueId');
-        maybeAddNullable('githubIssueUpdatedAt');
-        if (!existingCols.has('needsProducerReview')) {
-          this.db.exec(`ALTER TABLE workitems ADD COLUMN needsProducerReview INTEGER NOT NULL DEFAULT 0`);
-        }
-      }
-
-      if (existingVersion < 4) {
-        const cols = this.db.prepare(`PRAGMA table_info('workitems')`).all() as any[];
-        const existingCols = new Set(cols.map(c => String(c.name)));
-        const maybeAdd = (name: string) => {
-          if (!existingCols.has(name)) {
-            this.db.exec(`ALTER TABLE workitems ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`);
-          }
-        };
-        maybeAdd('risk');
-        maybeAdd('effort');
-      }
-
-      if (existingVersion < 5) {
-        const cols = this.db.prepare(`PRAGMA table_info('workitems')`).all() as any[];
-        const existingCols = new Set(cols.map(c => String(c.name)));
-        if (!existingCols.has('sortIndex')) {
-          this.db.exec('ALTER TABLE workitems ADD COLUMN sortIndex INTEGER NOT NULL DEFAULT 0');
-        }
-      }
-
-      if (existingVersion < 6) {
-        this.db.exec(`
-          CREATE TABLE IF NOT EXISTS dependency_edges (
-            fromId TEXT NOT NULL,
-            toId TEXT NOT NULL,
-            createdAt TEXT NOT NULL,
-            PRIMARY KEY (fromId, toId),
-            FOREIGN KEY (fromId) REFERENCES workitems(id) ON DELETE CASCADE,
-            FOREIGN KEY (toId) REFERENCES workitems(id) ON DELETE CASCADE
-          )
-        `);
-      }
-
-      // Ensure comment columns are present for tests
-      const commentCols = this.db.prepare(`PRAGMA table_info('comments')`).all() as any[];
-      const existingCommentCols = new Set(commentCols.map(c => String(c.name)));
-      if (!existingCommentCols.has('githubCommentId')) {
-        this.db.exec(`ALTER TABLE comments ADD COLUMN githubCommentId INTEGER`);
-      }
-      if (!existingCommentCols.has('githubCommentUpdatedAt')) {
-        this.db.exec(`ALTER TABLE comments ADD COLUMN githubCommentUpdatedAt TEXT`);
-      }
-
-      // Bump schemaVersion metadata for test runs so tests see the expected version
-      this.setMetadata('schemaVersion', SCHEMA_VERSION.toString());
-    }
+    // Legacy test-mode ALTER behavior removed. Tests should rely on the
+    // centralized migration runner (src/migrations) or explicitly create the
+    // expected schema during test setup. This avoids having a separate code
+    // path that silently alters databases and ensures production and tests
+    // share the same migration mechanism.
 
     // Create comments table
     this.db.exec(`
