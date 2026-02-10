@@ -37,7 +37,7 @@ export default function register(ctx: PluginContext): void {
             output.json({ success: true, pending: [] });
             return;
           }
-          console.log('Doctor: no pending migrations.');
+          console.log('Doctor: no pending migrations. See docs/migrations.md for migration policy and guidance.');
           return;
         }
 
