@@ -30,6 +30,7 @@ export default function register(ctx: PluginContext): void {
     .option('--created-by <createdBy>', 'New created by (interoperability field)')
     .option('--deleted-by <deletedBy>', 'New deleted by (interoperability field)')
     .option('--delete-reason <deleteReason>', 'New delete reason (interoperability field)')
+    .option('--needs-producer-review <true|false>', 'Set needsProducerReview flag (true|false|yes|no)')
     .option('--prefix <prefix>', 'Override the default prefix')
     .action(async (id: string, options: UpdateOptions) => {
       utils.requireInitialized();
@@ -93,6 +94,17 @@ export default function register(ctx: PluginContext): void {
       if (options.createdBy !== undefined) updates.createdBy = options.createdBy;
       if (options.deletedBy !== undefined) updates.deletedBy = options.deletedBy;
       if (options.deleteReason !== undefined) updates.deleteReason = options.deleteReason;
+      if (options.needsProducerReview !== undefined) {
+        const raw = String(options.needsProducerReview).toLowerCase();
+        const truthy = ['true', 'yes', '1'];
+        const falsy = ['false', 'no', '0'];
+        if (truthy.includes(raw)) updates.needsProducerReview = true;
+        else if (falsy.includes(raw)) updates.needsProducerReview = false;
+        else {
+          output.error(`Invalid value for --needs-producer-review: ${options.needsProducerReview}`, { success: false, error: 'invalid-arg' });
+          process.exit(1);
+        }
+      }
       
       const item = db.update(normalizedId, updates);
       if (!item) {

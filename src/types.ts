@@ -96,6 +96,8 @@ export interface UpdateWorkItemInput {
 
   risk?: WorkItemRiskLevel | '';
   effort?: WorkItemEffortLevel | '';
+  /** When present, sets the needsProducerReview flag */
+  needsProducerReview?: boolean;
 }
 
 /**

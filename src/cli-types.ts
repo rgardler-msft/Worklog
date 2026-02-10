@@ -57,6 +57,8 @@ export interface UpdateOptions {
   tags?: string;
   assignee?: string;
   stage?: string;
+  /** Accepts true|false|yes|no to set needsProducerReview flag */
+  needsProducerReview?: string;
   risk?: string;
   effort?: string;
   issueType?: string;
