@@ -73,6 +73,8 @@ export interface CreateWorkItemInput {
 
   risk?: WorkItemRiskLevel | '';
   effort?: WorkItemEffortLevel | '';
+  /** When present, sets the needsProducerReview flag on the created item */
+  needsProducerReview?: boolean;
 }
 
 /**

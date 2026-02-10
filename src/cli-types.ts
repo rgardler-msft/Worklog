@@ -29,6 +29,8 @@ export interface CreateOptions {
   createdBy?: string;
   deletedBy?: string;
   deleteReason?: string;
+  /** Accepts true|false|yes|no to set needsProducerReview flag for the new item */
+  needsProducerReview?: string;
   prefix?: string;
 }
 
