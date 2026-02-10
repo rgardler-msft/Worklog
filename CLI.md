@@ -376,6 +376,17 @@ Options:
 - `--gap <gap>` — Integer gap between consecutive `sort_index` values (optional; default: `100`).
 - `--prefix <prefix>` — Override the default prefix (optional).
 
+Additionally, database schema upgrades are available via `wl doctor upgrade` (preview with `--dry-run`, apply with `--confirm`).
+
+Examples:
+
+```sh
+wl migrate sort-index --dry-run
+wl migrate sort-index --gap 100
+wl doctor upgrade --dry-run       # Preview pending schema migrations
+wl doctor upgrade --confirm       # Apply pending schema migrations (creates backups, requires confirmation)
+```
+
 Examples:
 
 ```sh
