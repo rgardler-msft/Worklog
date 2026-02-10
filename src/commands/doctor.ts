@@ -46,8 +46,31 @@ export default function register(ctx: PluginContext): void {
             output.json({ success: true, dryRun: true, pending });
             return;
           }
-          console.log('Pending migrations:');
-          pending.forEach(p => console.log(` - ${p.id}: ${p.description} (safe=${p.safe})`));
+          // Only list safe migrations in normal doctor output per request
+          const safeMigs = pending.filter(p => p.safe);
+          console.log('Pending safe migrations:');
+          safeMigs.forEach(p => console.log(` - ${p.id}: ${p.description}`));
+          console.log('');
+          // Prompt to ask if safe migrations should be applied
+          const readlineMod = await import('node:readline');
+          const answer = await new Promise<boolean>(resolve => {
+            const rl = readlineMod.createInterface({ input: process.stdin, output: process.stdout });
+            rl.question(`Apply ${safeMigs.length} safe migration(s) now? (y/N): `, (a: string) => {
+              rl.close();
+              const v = (a || '').trim().toLowerCase();
+              resolve(v === 'y' || v === 'yes');
+            });
+          });
+          if (answer) {
+            try {
+              const result = runMigrations({ dryRun: false, confirm: true, logger: { info: s => console.error(s), error: s => console.error(s) } }, undefined, { safeOnly: true });
+              console.log(`Applied migrations: ${result.applied.map(a => a.id).join(', ')}`);
+              if (result.backups && result.backups.length > 0) console.log(`Backups: ${result.backups.join(', ')}`);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              console.error(`Migration failed: ${message}`);
+            }
+          }
           return;
         }
 

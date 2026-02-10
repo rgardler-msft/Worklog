@@ -98,7 +98,7 @@ function makeBackup(dbPath: string, logger?: { info: (s: string) => void; error:
   return out;
 }
 
-export function runMigrations(opts: RunOptions = {}, dbPath?: string): { applied: MigrationInfo[]; backups: string[] } {
+export function runMigrations(opts: RunOptions = {}, dbPath?: string, filter?: { safeOnly?: boolean }): { applied: MigrationInfo[]; backups: string[] } {
   const file = resolveDbPath(dbPath);
   const logger = opts.logger || { info: () => {}, error: () => {} };
   if (!fs.existsSync(file)) {
@@ -132,6 +132,7 @@ export function runMigrations(opts: RunOptions = {}, dbPath?: string): { applied
   try {
     const tx = db.transaction(() => {
       for (const m of MIGRATIONS) {
+        if (filter?.safeOnly && !m.safe) continue;
         if (m.id === '20260210-add-needsProducerReview') {
           const cols = db.prepare(`PRAGMA table_info('workitems')`).all() as any[];
           const existingCols = new Set(cols.map(c => String(c.name)));
