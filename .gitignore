@@ -154,3 +154,8 @@ Worklog Specific Ignores
 .opencode/tmp/
 
 ### End of Worklog Specific Ignores
+
+# Ignore migration test DB backups and temporary backup folders created during tests
+# Example: test/tmp_mig/backups/worklog.db.2026-02-10T184519
+test/**/backups/
+**/backups/
