@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { WorkItem, Comment, DependencyEdge } from './types.js';
+import { listPendingMigrations } from './migrations/index.js';
 
 interface DbMetadata {
   lastJsonlImportMtime?: number;
@@ -119,15 +120,32 @@ export class SqlitePersistentStore {
     // application SCHEMA_VERSION. Operators should run `wl doctor upgrade` to
     // preview and apply migrations (backups are created by the migration
     // runner). We intentionally do NOT alter the DB schema here.
-    if (!isNewDb && !runningInTest) {
-      const existingVersion = schemaVersionRaw ? parseInt(schemaVersionRaw, 10) : 1;
-      if (existingVersion < SCHEMA_VERSION) {
-        console.warn(
-          `Worklog: database at ${this.dbPath} has schemaVersion=${existingVersion} but the application expects schemaVersion=${SCHEMA_VERSION}. ` +
-          `No automatic schema changes were performed. Run 'wl doctor upgrade' (or see src/migrations) to preview and apply pending migrations.`
-        );
+      if (!isNewDb && !runningInTest) {
+        const existingVersion = schemaVersionRaw ? parseInt(schemaVersionRaw, 10) : 1;
+        if (existingVersion < SCHEMA_VERSION) {
+          // Try to include the pending migration ids to help operators run the
+          // appropriate `wl doctor upgrade` command. We deliberately do not
+          // perform any schema changes here — migrations are centralized in
+          // src/migrations and must be applied via `wl doctor upgrade` so that
+          // operators can preview and back up their DB first.
+          let pendingMsg = "see 'wl doctor upgrade' to list and apply pending migrations";
+          try {
+            const pending = listPendingMigrations(this.dbPath);
+            if (pending && pending.length > 0) {
+              const ids = pending.map(p => p.id).join(', ');
+              pendingMsg = `pending migrations: ${ids}. Run 'wl doctor upgrade --dry-run' to preview and '--confirm' to apply`;
+            }
+          } catch (err) {
+            // Best-effort: if listing migrations fails do not throw — emit the
+            // warning without the migration list so opening the DB still works.
+          }
+
+          console.warn(
+            `Worklog: database at ${this.dbPath} has schemaVersion=${existingVersion} but the application expects schemaVersion=${SCHEMA_VERSION}. ` +
+            `No automatic schema changes were performed. ${pendingMsg} (migrations live in src/migrations)`
+          );
+        }
       }
-    }
 
     // Legacy test-mode ALTER behavior removed. Tests should rely on the
     // centralized migration runner (src/migrations) or explicitly create the
