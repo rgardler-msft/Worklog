@@ -96,6 +96,7 @@ export const DEFAULT_SHORTCUTS = [
       { keys: 'M', description: 'Move/reparent item' },
       { keys: 'D', description: 'Toggle do-not-delegate' },
       { keys: 'r/R', description: 'Toggle needs review' },
+      { keys: 'W', description: 'Create new work item' },
     ],
   },
   {
@@ -148,6 +149,7 @@ export const KEY_FILTER_NEEDS_REVIEW = ['v', 'V'];
 export const KEY_TOGGLE_DO_NOT_DELEGATE = ['d', 'D'];
 export const KEY_TOGGLE_NEEDS_REVIEW = ['r', 'R'];
 export const KEY_MOVE = ['m', 'M'];
+export const KEY_CREATE_ITEM = ['w', 'W'];
 
 // Composite keys often used in help menu / close handlers
 export const KEY_MENU_CLOSE = ['escape', 'q'];

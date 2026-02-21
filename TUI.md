@@ -26,7 +26,8 @@ This document describes the interactive terminal UI shipped as the `wl tui` (or 
 
 ### Work Item Actions
 
-- n — create new work item
+- W — create new work item (opens a dialog, sends description to OpenCode)
+- n — find next work item recommendation
 - e — edit selected item
 - c — add comment to selected item
 - d — delete selected item

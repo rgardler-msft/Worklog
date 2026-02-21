@@ -36,7 +36,7 @@ import ChordHandler from './chords.js';
 import { stripAnsi, stripTags, decorateIdsForClick, extractIdFromLine, extractIdAtColumn, stripTagsAndAnsiWithMap, wrapPlainLineWithMap } from './id-utils.js';
 import { AVAILABLE_COMMANDS, MIN_INPUT_HEIGHT, MAX_INPUT_LINES, FOOTER_HEIGHT, OPENCODE_SERVER_PORT,
   KEY_NAV_RIGHT, KEY_NAV_LEFT, KEY_TOGGLE_EXPAND, KEY_QUIT, KEY_ESCAPE, KEY_TOGGLE_HELP, KEY_CHORD_PREFIX, KEY_CHORD_FOLLOWUPS, KEY_OPEN_OPENCODE, KEY_OPEN_SEARCH,
-  KEY_TAB, KEY_SHIFT_TAB, KEY_LEFT_SINGLE, KEY_RIGHT_SINGLE, KEY_CS, KEY_ENTER, KEY_LINEFEED, KEY_J, KEY_K, KEY_COPY_ID, KEY_PARENT_PREVIEW, KEY_CLOSE_ITEM, KEY_UPDATE_ITEM, KEY_REFRESH, KEY_FIND_NEXT, KEY_FILTER_IN_PROGRESS, KEY_FILTER_OPEN, KEY_FILTER_BLOCKED, KEY_FILTER_NEEDS_REVIEW, KEY_MENU_CLOSE, KEY_TOGGLE_DO_NOT_DELEGATE, KEY_TOGGLE_NEEDS_REVIEW, KEY_MOVE } from './constants.js';
+  KEY_TAB, KEY_SHIFT_TAB, KEY_LEFT_SINGLE, KEY_RIGHT_SINGLE, KEY_CS, KEY_ENTER, KEY_LINEFEED, KEY_J, KEY_K, KEY_COPY_ID, KEY_PARENT_PREVIEW, KEY_CLOSE_ITEM, KEY_UPDATE_ITEM, KEY_REFRESH, KEY_FIND_NEXT, KEY_FILTER_IN_PROGRESS, KEY_FILTER_OPEN, KEY_FILTER_BLOCKED, KEY_FILTER_NEEDS_REVIEW, KEY_MENU_CLOSE, KEY_TOGGLE_DO_NOT_DELEGATE, KEY_TOGGLE_NEEDS_REVIEW, KEY_MOVE, KEY_CREATE_ITEM } from './constants.js';
 import { theme } from '../theme.js';
 
 type Item = WorkItem;
@@ -2712,6 +2712,18 @@ export class TuiController {
         // No legacy pending-state fallback: chordHandler.feed handles all
         // Ctrl-W prefixes and their follow-ups. If chordHandler didn't
         // consume the event we fall through to normal key handlers.
+
+        // Create new work item (W key) — handled here instead of
+        // screen.key to avoid overwriting the Ctrl+W,w chord follow-up
+        // handler in the test mock.
+        const keyName = key?.name;
+        if (keyName === 'w' && !key?.ctrl && !key?.meta) {
+          if (!state.moveMode
+            && detailModal.hidden && !helpMenu.isVisible() && closeDialog.hidden && updateDialog.hidden && nextDialog.hidden
+            && opencodeDialog.hidden) {
+            openCreateItemDialog();
+          }
+        }
       });
 
         // Keep lightweight screen.key wrappers so tests and some widget-level
@@ -2752,6 +2764,10 @@ export class TuiController {
       }
     });
 
+    // Create new work item dialog (shortcut W) — handled in the raw
+    // keypress handler below to avoid conflicting with the Ctrl+W, w
+    // chord follow-up registered via screen.key(KEY_CHORD_FOLLOWUPS).
+
     const restoreListFocus = () => {
       try {
         list.focus();
@@ -2765,6 +2781,30 @@ export class TuiController {
       try { modalDialogs.forceCleanup?.(); } catch (_) {}
       restoreListFocus();
     };
+
+    async function openCreateItemDialog() {
+      try {
+        const description = await modalDialogs.editTextarea({
+          title: 'Create Item',
+          initial: '',
+          confirmLabel: 'Create',
+          cancelLabel: 'Cancel',
+          width: '70%',
+          height: 5,
+        });
+
+        const trimmed = (description || '').trim();
+        if (!trimmed) {
+          restoreListFocus();
+          return;
+        }
+
+        const prompt = 'Create a new work-item for the following description. Assign an appropriate priority and issue-type based on your understanding of the project. Record any dependencies that you can identify. Do not ask clarifying questions, if there is something you truly do not understand use the description verbatum and insert an Open Questions section into the description. \n\n' + trimmed + '.';
+        runOpencode(prompt);
+      } catch (_) {
+        restoreListFocus();
+      }
+    }
 
     // Open search/filter modal (shortcut /)
      screen.key(KEY_OPEN_SEARCH, async () => {
