@@ -1116,10 +1116,11 @@ export class WorklogDatabase {
     assignee?: string,
     searchTerm?: string,
     recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore',
-    includeInReview: boolean = false
+    includeInReview: boolean = false,
+    includeBlocked: boolean = false
   ): NextWorkItemResult {
     const items = this.store.getAllWorkItems();
-    return this.findNextWorkItemFromItems(items, assignee, searchTerm, recencyPolicy, undefined, '[next]', includeInReview);
+    return this.findNextWorkItemFromItems(items, assignee, searchTerm, recencyPolicy, undefined, '[next]', includeInReview, includeBlocked);
   }
 
   /**
@@ -1131,7 +1132,8 @@ export class WorklogDatabase {
     assignee?: string,
     searchTerm?: string,
     recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore',
-    includeInReview: boolean = false
+    includeInReview: boolean = false,
+    includeBlocked: boolean = false
   ): NextWorkItemResult[] {
     const results: NextWorkItemResult[] = [];
     const excluded = new Set<string>();
@@ -1144,7 +1146,8 @@ export class WorklogDatabase {
         recencyPolicy,
         excluded,
         `[next batch ${i + 1}/${count}]`,
-        includeInReview
+        includeInReview,
+        includeBlocked
       );
 
       results.push(result);

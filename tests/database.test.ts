@@ -745,6 +745,32 @@ describe('WorklogDatabase', () => {
       expect(result.reason).toContain(blocked.id);
     });
 
+    it('should exclude dependency-blocked items by default', () => {
+      // Dependent A depends on blocker B. By default A should not be recommended.
+      const blocker = db.create({ title: 'Dependency blocker', priority: 'medium', status: 'open' });
+      const dependent = db.create({ title: 'Dependent (should be blocked)', priority: 'high', status: 'open' });
+      db.addDependencyEdge(dependent.id, blocker.id);
+
+      // Create another open item to be selected when dependent is excluded
+      const other = db.create({ title: 'Other open', priority: 'low', status: 'open' });
+
+      const result = db.findNextWorkItem();
+      // Dependent should be excluded by default (dependency-blocked), so result should not be the dependent
+      expect(result.workItem?.id).not.toBe(dependent.id);
+      // Prefer higher-priority items among available candidates; ensure we selected something sensible
+      expect(result.workItem).not.toBeNull();
+    });
+
+    it('should include dependency-blocked items when includeBlocked=true', () => {
+      const blocker = db.create({ title: 'Dependency blocker', priority: 'low', status: 'open' });
+      const dependent = db.create({ title: 'Dependent (blocked but requested)', priority: 'high', status: 'open' });
+      db.addDependencyEdge(dependent.id, blocker.id);
+
+      // No other items: when includeBlocked=true the dependent should be returned
+      const result = db.findNextWorkItem(undefined, undefined, 'ignore', false, true);
+      expect(result.workItem?.id).toBe(dependent.id);
+    });
+
     it('should ignore blocking issues mentioned in description', () => {
       const blocker = db.create({ title: 'Blocking issue', priority: 'low', status: 'open' });
       const blocked = db.create({
