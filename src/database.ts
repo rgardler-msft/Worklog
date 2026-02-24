@@ -69,58 +69,62 @@ export class WorklogDatabase {
   }
 
   /**
-   * Refresh database from JSONL file if JSONL is newer
+   * Refresh database from JSONL file if JSONL is newer.
+   *
+   * This method is intentionally lockless: the write path
+   * (`exportToJsonl()`) uses atomic temp-file + rename, so readers
+   * always see either the old or the new complete file.  Removing the
+   * exclusive lock here eliminates contention between concurrent
+   * read-only commands and writers.
    */
   private refreshFromJsonlIfNewer(): void {
     if (!fs.existsSync(this.jsonlPath)) {
       return; // No JSONL file, nothing to refresh from
     }
 
-    // Hold the file lock while checking mtime and importing to prevent
-    // another process from writing between our stat and read.
-    withFileLock(this.lockPath, () => {
-      if (!fs.existsSync(this.jsonlPath)) {
-        return; // File may have been removed between our check and lock acquisition
+    // Re-check existence: the file may have been removed between our
+    // initial check and reaching this point.
+    if (!fs.existsSync(this.jsonlPath)) {
+      return;
+    }
+
+    const jsonlStats = fs.statSync(this.jsonlPath);
+    const jsonlMtime = jsonlStats.mtimeMs;
+
+    const metadata = this.store.getAllMetadata();
+    const lastImportMtime = metadata.lastJsonlImportMtime;
+    const lastExportMtimeStr = this.store.getMetadata('lastJsonlExportMtime');
+    const lastExportMtime = lastExportMtimeStr ? Number(lastExportMtimeStr) : undefined;
+
+    // If DB is empty or JSONL is newer, refresh from JSONL
+    const itemCount = this.store.countWorkItems();
+    // Avoid re-importing a file we just exported ourselves. If the JSONL mtime equals the
+    // last export mtime recorded in the DB, skip the refresh. Otherwise fall back to the
+    // previous logic (DB empty or JSONL newer than last import).
+    const isOurExport = lastExportMtime !== undefined && Math.abs(jsonlMtime - lastExportMtime) < 1;
+    const shouldRefresh = !isOurExport && (itemCount === 0 || !lastImportMtime || jsonlMtime > lastImportMtime);
+
+    if (shouldRefresh) {
+      if (!this.silent) {
+        // Debug: send to stderr so JSON stdout is preserved for --json mode
+        this.debug(`Refreshing database from ${this.jsonlPath}...`);
+      }
+      const { items: jsonlItems, comments: jsonlComments, dependencyEdges } = importFromJsonl(this.jsonlPath);
+      this.store.importData(jsonlItems, jsonlComments);
+      for (const edge of dependencyEdges) {
+        if (this.store.getWorkItem(edge.fromId) && this.store.getWorkItem(edge.toId)) {
+          this.store.saveDependencyEdge(edge);
+        }
       }
 
-      const jsonlStats = fs.statSync(this.jsonlPath);
-      const jsonlMtime = jsonlStats.mtimeMs;
+      // Update metadata
+      this.store.setMetadata('lastJsonlImportMtime', jsonlMtime.toString());
+      this.store.setMetadata('lastJsonlImportAt', new Date().toISOString());
 
-      const metadata = this.store.getAllMetadata();
-      const lastImportMtime = metadata.lastJsonlImportMtime;
-      const lastExportMtimeStr = this.store.getMetadata('lastJsonlExportMtime');
-      const lastExportMtime = lastExportMtimeStr ? Number(lastExportMtimeStr) : undefined;
-
-      // If DB is empty or JSONL is newer, refresh from JSONL
-      const itemCount = this.store.countWorkItems();
-      // Avoid re-importing a file we just exported ourselves. If the JSONL mtime equals the
-      // last export mtime recorded in the DB, skip the refresh. Otherwise fall back to the
-      // previous logic (DB empty or JSONL newer than last import).
-      const isOurExport = lastExportMtime !== undefined && Math.abs(jsonlMtime - lastExportMtime) < 1;
-      const shouldRefresh = !isOurExport && (itemCount === 0 || !lastImportMtime || jsonlMtime > lastImportMtime);
-
-      if (shouldRefresh) {
-        if (!this.silent) {
-          // Debug: send to stderr so JSON stdout is preserved for --json mode
-          this.debug(`Refreshing database from ${this.jsonlPath}...`);
-        }
-        const { items: jsonlItems, comments: jsonlComments, dependencyEdges } = importFromJsonl(this.jsonlPath);
-        this.store.importData(jsonlItems, jsonlComments);
-        for (const edge of dependencyEdges) {
-          if (this.store.getWorkItem(edge.fromId) && this.store.getWorkItem(edge.toId)) {
-            this.store.saveDependencyEdge(edge);
-          }
-        }
-
-        // Update metadata
-        this.store.setMetadata('lastJsonlImportMtime', jsonlMtime.toString());
-        this.store.setMetadata('lastJsonlImportAt', new Date().toISOString());
-
-        if (!this.silent) {
-          this.debug(`Loaded ${jsonlItems.length} work items and ${jsonlComments.length} comments from JSONL`);
-        }
+      if (!this.silent) {
+        this.debug(`Loaded ${jsonlItems.length} work items and ${jsonlComments.length} comments from JSONL`);
       }
-    });
+    }
   }
 
   /**
