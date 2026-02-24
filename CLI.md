@@ -280,8 +280,14 @@ Full-text search over work items using FTS5 (title, description, comments, tags)
 Options:
 
 `-s, --status <status>` (optional) — Filter results by status
+`-p, --priority <priority>` (optional) — Filter by priority
 `--parent <id>` (optional) — Filter results by parent work item id
 `--tags <tags>` (optional) — Filter by tags (comma-separated)
+`-a, --assignee <assignee>` (optional) — Filter by assignee
+`--stage <stage>` (optional) — Filter by stage
+`--deleted` (optional) — Include deleted items in results
+`--needs-producer-review [value]` (optional) — Filter by needsProducerReview flag (true|false|yes|no; default true when omitted)
+`--issue-type <type>` (optional) — Filter by issue type
 `-l, --limit <n>` (optional) — Maximum number of results (default: 20)
 `--rebuild-index` (optional) — Rebuild the FTS index from scratch before searching
 `--prefix <prefix>` (optional)
@@ -292,7 +298,11 @@ Examples:
 ```sh
 wl search "database corruption"
 wl search "memory leak" --status open
+wl search "bug" --priority high --assignee alice
+wl search "migration" --stage in_progress
 wl search "authentication" --tags security,auth --limit 5
+wl search "feature" --issue-type epic
+wl search "review" --needs-producer-review
 wl --json search "cli refactor"
 wl search "rebuild" --rebuild-index
 ```
