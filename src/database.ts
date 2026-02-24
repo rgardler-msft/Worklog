@@ -1111,11 +1111,25 @@ export class WorklogDatabase {
       if (excluded?.has(selectedInProgress.id)) {
         return { workItem: null, reason: 'No available items after exclusions' };
       }
-      // No suitable direct children, return the in-progress item itself
-      return {
-        workItem: selectedInProgress,
-        reason: `In-progress item with no open children`
-      };
+      // No suitable direct children — fall through to find the best non-in-progress
+      // open item instead of returning the in-progress item itself (it's already
+      // being worked on, so wl next should recommend something actionable).
+      const fallbackItems = filteredItems.filter(item => {
+        const ns = item.status.replace(/_/g, '-');
+        return ns !== 'in-progress' &&
+               ns !== 'blocked' &&
+               item.status !== 'completed' &&
+               item.status !== 'deleted' &&
+               item.id !== selectedInProgress.id;
+      }).filter(item => !excluded?.has(item.id));
+      const fallback = this.selectBySortIndex(fallbackItems, recencyPolicy);
+      if (fallback) {
+        return {
+          workItem: fallback,
+          reason: `Next open item by sort_index (in-progress item ${selectedInProgress.id} has no open children)`
+        };
+      }
+      return { workItem: null, reason: 'No actionable work items available (only in-progress items remain)' };
     }
 
     const selected = this.selectBySortIndex(filteredChildren, recencyPolicy);

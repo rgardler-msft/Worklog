@@ -675,13 +675,25 @@ describe('WorklogDatabase', () => {
       expect(result.workItem?.id).toBe(target.id);
     });
 
-    it('should return in-progress item if it has no suitable children', () => {
+    it('should not return in-progress item when it has no suitable children', () => {
       const parent = db.create({ title: 'Parent', priority: 'high', status: 'in-progress' });
       db.create({ title: 'Completed child', priority: 'high', status: 'completed', parentId: parent.id });
       
       const result = db.findNextWorkItem();
-      expect(result.workItem?.id).toBe(parent.id);
-      expect(result.reason).toContain('no open children');
+      // The in-progress item is already being worked on so wl next should not
+      // recommend it again. With no other open items the result should be null.
+      expect(result.workItem).toBeNull();
+    });
+
+    it('should skip in-progress item with no children and select next open item', () => {
+      const parent = db.create({ title: 'In-progress parent', priority: 'high', status: 'in-progress' });
+      db.create({ title: 'Completed child', priority: 'high', status: 'completed', parentId: parent.id });
+      const openItem = db.create({ title: 'Other open task', priority: 'medium', status: 'open' });
+      
+      const result = db.findNextWorkItem();
+      // Should skip the in-progress parent and return the open item instead
+      expect(result.workItem?.id).toBe(openItem.id);
+      expect(result.reason).toContain('Next open item by sort_index');
     });
 
     it('should select highest priority child when multiple children exist', () => {
