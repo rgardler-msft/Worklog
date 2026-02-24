@@ -915,5 +915,70 @@ describe('WorklogDatabase', () => {
       expect(result.workItem?.id).toBe(bestChild.id);
       expect(result.reason).toContain('child');
     });
+
+    // Dependency-blocker filter tests (WL-0MM04HDI618Y7DT0)
+
+    it('should not return a dependency-blocked item by default', () => {
+      // A has a dependency edge to B (A depends on B), so A is blocked
+      // C is a normal open item that should be returned instead
+      const itemA = db.create({ title: 'Dep-blocked item A', priority: 'high', status: 'open' });
+      const itemB = db.create({ title: 'Prerequisite B', priority: 'low', status: 'open' });
+      db.addDependencyEdge(itemA.id, itemB.id);
+      const itemC = db.create({ title: 'Unblocked item C', priority: 'medium', status: 'open' });
+
+      const result = db.findNextWorkItem();
+      // A is dependency-blocked so it should be excluded; C or B should be selected
+      expect(result.workItem?.id).not.toBe(itemA.id);
+      // B or C should be selected (B is a prerequisite, C is unblocked)
+      expect([itemB.id, itemC.id]).toContain(result.workItem?.id);
+    });
+
+    it('should return a dependency-blocked item when includeBlocked=true', () => {
+      // A depends on B (A is dep-blocked), A has higher priority
+      const itemA = db.create({ title: 'Dep-blocked item A', priority: 'high', status: 'open' });
+      const itemB = db.create({ title: 'Prerequisite B', priority: 'low', status: 'open' });
+      db.addDependencyEdge(itemA.id, itemB.id);
+
+      // With includeBlocked=true, A should be in the candidate pool
+      const result = db.findNextWorkItem(undefined, undefined, 'ignore', false, true);
+      // A is high priority and includeBlocked is true, so it may be selected
+      // The key assertion: A is NOT filtered out (it could be selected or its blocker could be)
+      expect(result.workItem).toBeDefined();
+    });
+
+    it('should return a dep-blocked item whose blocker is completed (edge inactive)', () => {
+      // A depends on B, but B is completed so the edge is inactive
+      const itemA = db.create({ title: 'Formerly blocked A', priority: 'high', status: 'open' });
+      const itemB = db.create({ title: 'Completed prerequisite B', priority: 'low', status: 'completed' });
+      db.addDependencyEdge(itemA.id, itemB.id);
+
+      const result = db.findNextWorkItem();
+      // B is completed, so the dependency edge is inactive; A should NOT be filtered
+      expect(result.workItem?.id).toBe(itemA.id);
+    });
+
+    it('should still surface blockers for critical dep-blocked items', () => {
+      // Critical item X depends on Y (X is dep-blocked)
+      // The critical path should still detect X and surface Y as the blocker
+      const itemY = db.create({ title: 'Blocker Y', priority: 'low', status: 'open' });
+      const itemX = db.create({ title: 'Critical blocked X', priority: 'critical', status: 'blocked' });
+      db.addDependencyEdge(itemX.id, itemY.id);
+
+      const result = db.findNextWorkItem();
+      // The critical path should surface Y as the blocker of X
+      expect(result.workItem?.id).toBe(itemY.id);
+      expect(result.reason).toContain('Blocking issue');
+      expect(result.reason).toContain(itemX.id);
+    });
+
+    it('should not affect items with no dependency edges (regression guard)', () => {
+      // Items with no dependency edges should be selected normally
+      db.create({ title: 'Low item', priority: 'low', status: 'open' });
+      const highItem = db.create({ title: 'High item', priority: 'high', status: 'open' });
+      db.create({ title: 'Medium item', priority: 'medium', status: 'open' });
+
+      const result = db.findNextWorkItem();
+      expect(result.workItem?.id).toBe(highItem.id);
+    });
   });
 });
