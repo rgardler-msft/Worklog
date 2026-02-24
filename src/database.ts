@@ -738,10 +738,17 @@ export class WorklogDatabase {
    * Compute a score for an item. Defaults: recencyPolicy='ignore'.
    * Higher score == more desirable.
    */
-  private computeScore(item: WorkItem, now: number, recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore'): number {
+   private computeScore(item: WorkItem, now: number, recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore'): number {
     // Weights are intentionally fixed and not configurable per request
+    //
+    // Ranking precedence (highest to lowest):
+    //   1. priority          — primary ranking (weight 1000 per level)
+    //   2. blocksHighPriority — boost for items that unblock high/critical work
+    //   3. blocked penalty   — heavy penalty for blocked items
+    //   4. age / effort / recency — fine-grained tie-breakers
     const WEIGHTS = {
       priority: 1000,
+      blocksHighPriority: 500,  // boost when this item unblocks high/critical items
       age: 10, // per day
       updated: 100, // recency boost/penalty
       blocked: -10000,
@@ -753,6 +760,29 @@ export class WorklogDatabase {
 
     // Priority base
     score += this.getPriorityValue(item.priority) * WEIGHTS.priority;
+
+    // Blocks-high-priority boost: if this item is a dependency prerequisite for
+    // active items with high or critical priority, add a proportional boost.
+    // This ensures that among equal-priority peers, unblockers rank higher.
+    // Uses store-direct access to avoid per-item refreshFromJsonlIfNewer overhead
+    // (consistent with the dependency filter at the top of findNextWorkItemFromItems).
+    const inboundEdges = this.store.getDependencyEdgesTo(item.id);
+    let maxBlockedPriorityValue = 0;
+    for (const edge of inboundEdges) {
+      const dependent = this.store.getWorkItem(edge.fromId);
+      if (dependent && dependent.status !== 'completed' && dependent.status !== 'deleted') {
+        const depPriority = this.getPriorityValue(dependent.priority);
+        // Only boost for high (3) or critical (4) dependents
+        if (depPriority >= 3 && depPriority > maxBlockedPriorityValue) {
+          maxBlockedPriorityValue = depPriority;
+        }
+      }
+    }
+    if (maxBlockedPriorityValue > 0) {
+      // Proportional: critical (4) gets a larger boost than high (3).
+      // Scale: high=1.0x, critical=1.33x of the base weight.
+      score += (maxBlockedPriorityValue / 3) * WEIGHTS.blocksHighPriority;
+    }
 
     // Age (createdAt) - small boost per day to avoid starvation
     const ageDays = Math.max(0, (now - new Date(item.createdAt).getTime()) / (1000 * 60 * 60 * 24));
