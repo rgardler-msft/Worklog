@@ -865,6 +865,18 @@ export class WorklogDatabase {
 
   /**
    * Shared next-item selection logic to keep single-item and batch results aligned.
+   *
+   * Selection proceeds through several phases:
+   *   1. Filter out deleted, epic, in_review (unless opted in), and excluded items.
+   *   2. Partition into dependency-blocked and unblocked candidates.
+   *   3. Critical-path escalation: if a critical item is blocked, surface its direct
+   *      blocker immediately (bypasses scoring).
+   *   4. Hierarchical descent: if an in-progress parent exists, recurse into its children.
+   *   5. Score-based ranking among remaining candidates via {@link computeScore}:
+   *        priority (1000/level) → blocks-high-priority boost (500) → blocked penalty
+   *        → age/effort/recency tie-breakers.
+   *   6. If no unblocked candidates remain and includeBlocked is set, fall back to
+   *      blocked items ranked by the same scoring logic.
    */
   private findNextWorkItemFromItems(
     items: WorkItem[],

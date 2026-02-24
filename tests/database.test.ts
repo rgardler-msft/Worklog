@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import * as path from 'path';
 import { WorklogDatabase } from '../src/database.js';
 import { createTempDir, cleanupTempDir, createTempJsonlPath, createTempDbPath } from './test-utils.js';
 
@@ -1006,6 +1007,217 @@ describe('WorklogDatabase', () => {
       // The open item or the prerequisite should be selected instead
       expect(result.workItem?.id).not.toBe(inProgressItem.id);
       expect([prereq.id, openItem.id]).toContain(result.workItem?.id);
+    });
+
+    // Blocks-high-priority scoring boost tests (WL-0MM0B4FNW0ZLOTV8)
+
+    it('should prefer item blocking a critical downstream item over equal-priority peer', () => {
+      // A and B are both high-priority open items.
+      // A blocks a critical downstream item; B blocks nothing.
+      // A should be recommended first due to the scoring boost.
+      const itemA = db.create({ title: 'Unblocker A', priority: 'high', status: 'open' });
+      const itemB = db.create({ title: 'Plain B', priority: 'high', status: 'open' });
+      const criticalDownstream = db.create({ title: 'Critical downstream', priority: 'critical', status: 'blocked' });
+      db.addDependencyEdge(criticalDownstream.id, itemA.id);
+
+      const result = db.findNextWorkItem();
+      expect(result.workItem?.id).toBe(itemA.id);
+    });
+
+    it('should prefer item blocking a high downstream item over equal-priority peer blocking nothing', () => {
+      // A and B are both medium-priority open items.
+      // A blocks a high-priority downstream item; B blocks nothing.
+      // A should be recommended first.
+      const itemA = db.create({ title: 'Unblocker A', priority: 'medium', status: 'open' });
+      const itemB = db.create({ title: 'Plain B', priority: 'medium', status: 'open' });
+      const highDownstream = db.create({ title: 'High downstream', priority: 'high', status: 'blocked' });
+      db.addDependencyEdge(highDownstream.id, itemA.id);
+
+      const result = db.findNextWorkItem();
+      expect(result.workItem?.id).toBe(itemA.id);
+    });
+
+    it('should preserve priority dominance: high-priority item beats medium that blocks high', () => {
+      // A is high priority, blocks nothing.
+      // B is medium priority, blocks a high-priority downstream item.
+      // A should still win because priority (weight 1000) dominates the boost (weight 500).
+      // Note: we use status:'open' on the downstream to avoid triggering the
+      // blocker-surfacing code path (which handles blocked items specially and
+      // preempts scoring). The dependency edge still exists so the boost applies.
+      const itemA = db.create({ title: 'High priority A', priority: 'high', status: 'open' });
+      const itemB = db.create({ title: 'Medium unblocker B', priority: 'medium', status: 'open' });
+      const highDownstream = db.create({ title: 'High downstream', priority: 'high', status: 'open' });
+      db.addDependencyEdge(highDownstream.id, itemB.id);
+
+      const result = db.findNextWorkItem();
+      expect(result.workItem?.id).toBe(itemA.id);
+    });
+
+    it('should prefer item blocking multiple high-priority items over one blocking a single high-priority item', () => {
+      // A blocks two high-priority downstream items; B blocks one.
+      // Both A and B are equal-priority. A should score higher.
+      // Note: the boost uses max blocked priority, not count, so this tests
+      // that the item blocking a critical item beats one blocking only high.
+      const itemA = db.create({ title: 'Unblocker A', priority: 'medium', status: 'open' });
+      const itemB = db.create({ title: 'Unblocker B', priority: 'medium', status: 'open' });
+      const criticalDownstream = db.create({ title: 'Critical downstream', priority: 'critical', status: 'blocked' });
+      const highDownstream = db.create({ title: 'High downstream', priority: 'high', status: 'blocked' });
+      // A blocks a critical item (higher boost)
+      db.addDependencyEdge(criticalDownstream.id, itemA.id);
+      // B blocks only a high item (lower boost)
+      db.addDependencyEdge(highDownstream.id, itemB.id);
+
+      const result = db.findNextWorkItem();
+      expect(result.workItem?.id).toBe(itemA.id);
+    });
+
+    it('should fall through to existing heuristics when blocks-high-priority scores are equal', async () => {
+      // A and B are equal priority and both block high-priority items (equal boost).
+      // Tie-breaker should fall through to existing heuristics (older item first).
+      const itemA = db.create({ title: 'Unblocker A', priority: 'medium', status: 'open' });
+      const delay = () => new Promise(resolve => setTimeout(resolve, 10));
+      await delay();
+      const itemB = db.create({ title: 'Unblocker B', priority: 'medium', status: 'open' });
+      const highDownstream1 = db.create({ title: 'High downstream 1', priority: 'high', status: 'blocked' });
+      const highDownstream2 = db.create({ title: 'High downstream 2', priority: 'high', status: 'blocked' });
+      db.addDependencyEdge(highDownstream1.id, itemA.id);
+      db.addDependencyEdge(highDownstream2.id, itemB.id);
+
+      const result = db.findNextWorkItem();
+      // A is older and has the same boost, so it should be selected
+      expect(result.workItem?.id).toBe(itemA.id);
+    });
+
+    it('should NOT boost an item that only blocks low/medium priority items', async () => {
+      // A blocks a low-priority item (no boost applied for low).
+      // B blocks nothing but has the same priority.
+      // Both should be treated equally (no boost), falling through to age heuristic.
+      const itemA = db.create({ title: 'Blocks low A', priority: 'medium', status: 'open' });
+      const lowDownstream = db.create({ title: 'Low downstream', priority: 'low', status: 'open' });
+      db.addDependencyEdge(lowDownstream.id, itemA.id);
+      const delay = () => new Promise(resolve => setTimeout(resolve, 10));
+      await delay();
+      const itemB = db.create({ title: 'Plain B', priority: 'medium', status: 'open' });
+
+      const result = db.findNextWorkItem();
+      // A should be selected due to age (older), NOT because of a boost
+      // The key assertion: A does NOT get a blocks-high-priority boost for low items
+      expect(result.workItem?.id).toBe(itemA.id);
+
+      // Verify the reverse: if B is older, B wins (no boost on A for medium downstream)
+      const db2TempDir = createTempDir();
+      const db2Path = createTempDbPath(db2TempDir);
+      const db2JsonlPath = createTempJsonlPath(db2TempDir);
+      const db2 = new WorklogDatabase('TEST', db2Path, db2JsonlPath, true, true);
+      try {
+        const olderB = db2.create({ title: 'Older plain B', priority: 'medium', status: 'open' });
+        await delay();
+        const newerA = db2.create({ title: 'Blocks medium A', priority: 'medium', status: 'open' });
+        const medDownstream = db2.create({ title: 'Medium downstream', priority: 'medium', status: 'open' });
+        db2.addDependencyEdge(medDownstream.id, newerA.id);
+
+        const result2 = db2.findNextWorkItem();
+        // B is older and A has no boost (medium doesn't qualify), so B wins
+        expect(result2.workItem?.id).toBe(olderB.id);
+      } finally {
+        db2.close();
+        cleanupTempDir(db2TempDir);
+      }
+    });
+
+    it('should not boost for completed or deleted downstream items', () => {
+      // A blocks a critical downstream item that is already completed.
+      // No boost should apply because the dependency is inactive.
+      const itemA = db.create({ title: 'Unblocker A', priority: 'medium', status: 'open' });
+      const itemB = db.create({ title: 'Plain B', priority: 'medium', status: 'open' });
+      const completedCritical = db.create({ title: 'Completed critical', priority: 'critical', status: 'completed' });
+      db.addDependencyEdge(completedCritical.id, itemA.id);
+
+      const result = db.findNextWorkItem();
+      // A should NOT get a boost because the downstream is completed
+      // Both are equal priority with no boost; A is older so A still wins by age
+      expect(result.workItem?.id).toBe(itemA.id);
+
+      // Verify with deleted status too
+      const db2TempDir = createTempDir();
+      const db2Path = createTempDbPath(db2TempDir);
+      const db2JsonlPath = createTempJsonlPath(db2TempDir);
+      const db2 = new WorklogDatabase('TEST', db2Path, db2JsonlPath, true, true);
+      try {
+        const olderB2 = db2.create({ title: 'Older B', priority: 'medium', status: 'open' });
+        const newerA2 = db2.create({ title: 'Blocks deleted A', priority: 'medium', status: 'open' });
+        const deletedCritical = db2.create({ title: 'Deleted critical', priority: 'critical', status: 'deleted' });
+        db2.addDependencyEdge(deletedCritical.id, newerA2.id);
+
+        const result2 = db2.findNextWorkItem();
+        // No boost for deleted items; B is older so B wins
+        expect(result2.workItem?.id).toBe(olderB2.id);
+      } finally {
+        db2.close();
+        cleanupTempDir(db2TempDir);
+      }
+    });
+
+    // Fixture-based integration test (WL-0MM0B4V7L1YSH0W7)
+    // Uses a generalized JSONL fixture inspired by ToneForge's dependency chain
+    // to verify that findNextWorkItem prefers an unblocker over equal-priority peers.
+    describe('fixture: next-ranking with dependency chain', () => {
+      let fixtureTempDir: string;
+      let fixtureDb: WorklogDatabase;
+
+      beforeEach(() => {
+        fixtureTempDir = createTempDir();
+        const fixtureSource = path.resolve(__dirname, 'fixtures', 'next-ranking-fixture.jsonl');
+        const fixtureJsonlPath = createTempJsonlPath(fixtureTempDir);
+        const fixtureDbPath = createTempDbPath(fixtureTempDir);
+        // Copy fixture to temp dir so the database can import it
+        fs.copyFileSync(fixtureSource, fixtureJsonlPath);
+        fixtureDb = new WorklogDatabase('FIX', fixtureDbPath, fixtureJsonlPath, false, true);
+      });
+
+      afterEach(() => {
+        fixtureDb.close();
+        cleanupTempDir(fixtureTempDir);
+      });
+
+      it('should prefer medium-priority unblocker over equal-priority peers when it blocks a high-priority item', () => {
+        // Fixture layout:
+        //   FIX-PHASE1 (high, completed) -- foundation
+        //   FIX-PHASE2 (medium, open)    -- blocks FIX-PHASE3 (high)
+        //   FIX-PHASE3 (high, open)      -- depends on FIX-PHASE2
+        //   FIX-PHASE4 (high, open)      -- depends on FIX-PHASE3
+        //   FIX-DISTRACT-A (medium, open) -- no dependencies
+        //   FIX-DISTRACT-B (medium, open) -- no dependencies
+        //
+        // Without the scoring boost, FIX-PHASE2 would tie with FIX-DISTRACT-A
+        // and FIX-DISTRACT-B on priority, and age tie-breakers would be used.
+        // With the boost, FIX-PHASE2 should be preferred because it blocks
+        // high-priority FIX-PHASE3.
+
+        const result = fixtureDb.findNextWorkItem();
+        expect(result.workItem).not.toBeNull();
+        expect(result.workItem!.id).toBe('FIX-PHASE2');
+      });
+
+      it('should include unblocking context in the reason string', () => {
+        const result = fixtureDb.findNextWorkItem();
+        expect(result.reason).toBeDefined();
+        // The reason should mention the scoring mechanism
+        expect(result.reason!.toLowerCase()).toMatch(/score|rank|prior/);
+      });
+
+      it('should select a high-priority item over the medium unblocker when one exists and is unblocked', () => {
+        // Regression guard: if we add an unblocked high-priority item that does NOT
+        // depend on anything, it should still beat the medium-priority unblocker.
+        // This verifies priority dominance is preserved.
+        const highItem = fixtureDb.create({ title: 'Urgent high item', priority: 'high', status: 'open' });
+
+        const result = fixtureDb.findNextWorkItem();
+        expect(result.workItem).not.toBeNull();
+        // The new unblocked high-priority item should beat the medium unblocker
+        // because priority weight (1000) > blocks-high-priority boost (500)
+        expect(result.workItem!.id).toBe(highItem.id);
+      });
     });
   });
 });

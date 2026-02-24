@@ -206,6 +206,21 @@ wl show WL-ABC123 -c
 
 Suggest the next work item(s) to work on using priority/status heuristics. By default, items with active dependency blockers are excluded.
 
+#### Ranking precedence
+
+When multiple candidate items exist, `wl next` ranks them using the following criteria (highest weight first):
+
+1. **Priority** — higher-priority items always rank above lower-priority items (weight 1000 per level: low=1000, medium=2000, high=3000, critical=4000).
+2. **Blocks high-priority work** — among equal-priority candidates, an item that is a prerequisite for a `high` or `critical` downstream item receives a scoring boost (weight 500, scaled proportionally for `critical`). This ensures that unblocking high-value work is preferred over unrelated tasks at the same priority.
+3. **Blocked penalty** — items with active dependency blockers receive a heavy penalty and are excluded by default (see `--include-blocked`).
+4. **Tie-breakers** — age (older items first), effort, and recency policy break remaining ties.
+
+Items with `status: 'blocked'` that have `critical` priority trigger a special escalation path: their direct blockers are surfaced immediately, bypassing the general scoring logic.
+
+#### Backward compatibility
+
+The `--include-blocked` flag behavior is unchanged. The ranking boost only affects ordering among candidates that are already considered (i.e., unblocked items by default).
+
 Options:
 
 `-a, --assignee <assignee>` (optional)
