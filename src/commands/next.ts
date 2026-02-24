@@ -13,7 +13,7 @@ export default function register(ctx: PluginContext): void {
   
   program
     .command('next')
-    .description('Find the next work item to work on based on priority and status')
+    .description('Find the next work item to work on based on priority and status (excludes dependency-blocked items by default)')
     .option('-a, --assignee <assignee>', 'Filter by assignee')
     .option('-s, --search <term>', 'Search term for fuzzy matching against title, description, and comments')
     .option('-n, --number <n>', 'Number of items to return (default: 1)', '1')

@@ -204,7 +204,7 @@ wl show WL-ABC123 -c
 
 ### `next` [options]
 
-Suggest the next work item(s) to work on using priority/status heuristics.
+Suggest the next work item(s) to work on using priority/status heuristics. By default, items with active dependency blockers are excluded.
 
 Options:
 
@@ -212,6 +212,7 @@ Options:
 `-s, --search <term>` (optional)
 `-n, --number <n>` — Number of items to return (optional; default: `1`).
 `--include-in-review` — Include items with status `blocked` and stage `in_review` (optional).
+`--include-blocked` — Include dependency-blocked items (excluded by default).
 `--prefix <prefix>` (optional)
 
 Examples:
@@ -220,6 +221,7 @@ Examples:
 wl next
 wl next -n 3
 wl next -a alice --search "bug"
+wl next --include-blocked
 ```
 
 ### `in-progress` [options]
