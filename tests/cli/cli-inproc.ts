@@ -26,6 +26,7 @@ import depCommand from '../../src/commands/dep.js';
 import reSortCommand from '../../src/commands/re-sort.js';
 import doctorCommand from '../../src/commands/doctor.js';
 import unlockCommand from '../../src/commands/unlock.js';
+import searchCommand from '../../src/commands/search.js';
 
 const builtInCommands = [
   initCommand,
@@ -51,6 +52,7 @@ const builtInCommands = [
   reSortCommand,
   doctorCommand,
   unlockCommand,
+  searchCommand,
 ];
 
 function splitShellArgs(cmd: string): string[] {

@@ -420,4 +420,53 @@ describe('CLI Issue Status Tests', () => {
       expect(stdout).not.toContain(`(${itemId})`);
     });
   });
+
+  describe('search command with new filter flags', () => {
+    beforeEach(async () => {
+      await execAsync(`tsx ${cliPath} create -t "Search high alice bug" -p high --assignee alice --issue-type bug --stage in_progress`);
+      await execAsync(`tsx ${cliPath} create -t "Search low bob feature" -p low --assignee bob --issue-type feature --stage idea`);
+      await execAsync(`tsx ${cliPath} create -t "Search high bob task" -p high --assignee bob --issue-type task --stage in_progress`);
+    });
+
+    it('should filter search results by --priority', async () => {
+      const { stdout } = await execAsync(`tsx ${cliPath} --json search "search" --priority high`);
+      const result = JSON.parse(stdout);
+      expect(result.success).toBe(true);
+      expect(result.results.length).toBe(2);
+    });
+
+    it('should filter search results by --assignee', async () => {
+      const { stdout } = await execAsync(`tsx ${cliPath} --json search "search" --assignee alice`);
+      const result = JSON.parse(stdout);
+      expect(result.success).toBe(true);
+      expect(result.results.length).toBe(1);
+    });
+
+    it('should filter search results by --issue-type', async () => {
+      const { stdout } = await execAsync(`tsx ${cliPath} --json search "search" --issue-type bug`);
+      const result = JSON.parse(stdout);
+      expect(result.success).toBe(true);
+      expect(result.results.length).toBe(1);
+    });
+
+    it('should filter search results by --stage', async () => {
+      const { stdout } = await execAsync(`tsx ${cliPath} --json search "search" --stage in_progress`);
+      const result = JSON.parse(stdout);
+      expect(result.success).toBe(true);
+      expect(result.results.length).toBe(2);
+    });
+
+    it('should combine --priority and --assignee', async () => {
+      const { stdout } = await execAsync(`tsx ${cliPath} --json search "search" --priority high --assignee bob`);
+      const result = JSON.parse(stdout);
+      expect(result.success).toBe(true);
+      expect(result.results.length).toBe(1);
+    });
+
+    it('should output human-readable format without --json', async () => {
+      const { stdout } = await execAsync(`tsx ${cliPath} search "search" --priority high`);
+      // Human-readable output should contain the search query echo
+      expect(stdout).toContain('search');
+    });
+  });
 });
