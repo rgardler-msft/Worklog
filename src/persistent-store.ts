@@ -854,30 +854,63 @@ export class SqlitePersistentStore {
       // Build the base query with BM25 ranking and snippets.
       // We extract snippets from each searchable column and pick the best one.
       // BM25 column weights: title=10, description=5, comments=2, tags=3
+      // JOIN with workitems table to support filtering by priority, assignee,
+      // stage, issueType, needsProducerReview, and deleted status.
       let sql = `
         SELECT
-          itemId,
+          worklog_fts.itemId,
           bm25(worklog_fts, 10.0, 5.0, 2.0, 3.0) AS rank,
           snippet(worklog_fts, 0, '<<', '>>', '...', 32) AS title_snippet,
           snippet(worklog_fts, 1, '<<', '>>', '...', 32) AS desc_snippet,
           snippet(worklog_fts, 2, '<<', '>>', '...', 32) AS comment_snippet,
           snippet(worklog_fts, 3, '<<', '>>', '...', 32) AS tags_snippet,
-          status,
-          parentId
+          worklog_fts.status,
+          worklog_fts.parentId
         FROM worklog_fts
+        JOIN workitems ON worklog_fts.itemId = workitems.id
         WHERE worklog_fts MATCH ?
       `;
 
       const params: (string | number)[] = [trimmed];
 
       if (options?.status) {
-        sql += ` AND status = ?`;
+        sql += ` AND worklog_fts.status = ?`;
         params.push(options.status);
       }
 
       if (options?.parentId) {
-        sql += ` AND parentId = ?`;
+        sql += ` AND worklog_fts.parentId = ?`;
         params.push(options.parentId);
+      }
+
+      if (options?.priority) {
+        sql += ` AND workitems.priority = ?`;
+        params.push(options.priority);
+      }
+
+      if (options?.assignee) {
+        sql += ` AND workitems.assignee = ?`;
+        params.push(options.assignee);
+      }
+
+      if (options?.stage) {
+        sql += ` AND workitems.stage = ?`;
+        params.push(options.stage);
+      }
+
+      if (options?.issueType) {
+        sql += ` AND workitems.issueType = ?`;
+        params.push(options.issueType);
+      }
+
+      if (options?.needsProducerReview !== undefined) {
+        sql += ` AND workitems.needsProducerReview = ?`;
+        params.push(options.needsProducerReview ? 1 : 0);
+      }
+
+      // By default exclude deleted items; include them when deleted: true
+      if (!options?.deleted) {
+        sql += ` AND workitems.status != 'deleted'`;
       }
 
       sql += ` ORDER BY rank LIMIT ?`;
@@ -979,6 +1012,25 @@ export class SqlitePersistentStore {
     if (options?.tags && options.tags.length > 0) {
       const tagSet = new Set(options.tags.map(t => t.toLowerCase()));
       items = items.filter(i => i.tags.some(t => tagSet.has(t.toLowerCase())));
+    }
+    if (options?.priority) {
+      items = items.filter(i => i.priority === options.priority);
+    }
+    if (options?.assignee) {
+      items = items.filter(i => i.assignee === options.assignee);
+    }
+    if (options?.stage) {
+      items = items.filter(i => i.stage === options.stage);
+    }
+    if (options?.issueType) {
+      items = items.filter(i => i.issueType === options.issueType);
+    }
+    if (options?.needsProducerReview !== undefined) {
+      items = items.filter(i => i.needsProducerReview === options.needsProducerReview);
+    }
+    // By default exclude deleted items; include them when deleted: true
+    if (!options?.deleted) {
+      items = items.filter(i => i.status !== 'deleted');
     }
 
     const allComments = this.getAllComments();
