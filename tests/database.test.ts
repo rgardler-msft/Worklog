@@ -980,5 +980,20 @@ describe('WorklogDatabase', () => {
       const result = db.findNextWorkItem();
       expect(result.workItem?.id).toBe(highItem.id);
     });
+
+    it('should not return a dep-blocked in-progress item', () => {
+      // An in-progress item that has active dependency blockers should NOT be
+      // returned as the next item. Instead, a non-blocked open item should be selected.
+      const inProgressItem = db.create({ title: 'In-progress dep-blocked', priority: 'high', status: 'in-progress' });
+      const prereq = db.create({ title: 'Prerequisite', priority: 'low', status: 'open' });
+      db.addDependencyEdge(inProgressItem.id, prereq.id);
+      const openItem = db.create({ title: 'Available open item', priority: 'medium', status: 'open' });
+
+      const result = db.findNextWorkItem();
+      // The in-progress item is dep-blocked, so it should not be selected
+      // The open item or the prerequisite should be selected instead
+      expect(result.workItem?.id).not.toBe(inProgressItem.id);
+      expect([prereq.id, openItem.id]).toContain(result.workItem?.id);
+    });
   });
 });

@@ -937,13 +937,20 @@ export class WorklogDatabase {
       };
     }
 
-    // Find in-progress and blocked items (use pre-dep-blocker pool so blocked items
-    // with dependency edges are still visible for blocker-surfacing logic)
-    const inProgressPool = this.applyFilters(preDepBlockerItems, assignee, searchTerm);
-    const inProgressItems = inProgressPool.filter(item => {
+    // Find in-progress and blocked items
+    // For blocked items: use pre-dep-blocker pool so blocked items with dependency
+    // edges are still visible for blocker-surfacing logic.
+    // For in-progress items: use filtered (post dep-blocker) pool so dep-blocked
+    // in-progress items are not selected as the final result.
+    const inProgressFromFiltered = this.applyFilters(filteredItems, assignee, searchTerm).filter(item => {
       const normalizedStatus = item.status.replace(/_/g, '-');
-      return normalizedStatus === 'in-progress' || normalizedStatus === 'blocked';
+      return normalizedStatus === 'in-progress';
     });
+    const blockedFromPreFilter = this.applyFilters(preDepBlockerItems, assignee, searchTerm).filter(item => {
+      const normalizedStatus = item.status.replace(/_/g, '-');
+      return normalizedStatus === 'blocked';
+    });
+    const inProgressItems = [...inProgressFromFiltered, ...blockedFromPreFilter];
     this.debug(`${debugPrefix} in-progress/blocked items=${inProgressItems.length}`);
 
     if (inProgressItems.length === 0) {
