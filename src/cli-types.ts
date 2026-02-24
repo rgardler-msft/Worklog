@@ -83,6 +83,7 @@ export interface NextOptions {
   number?: string;
   prefix?: string;
   includeInReview?: boolean;
+  includeBlocked?: boolean;
 }
 export interface InProgressOptions { assignee?: string; prefix?: string }
 
@@ -136,8 +137,16 @@ export interface DepOptions {
 
 export interface SearchOptions {
   status?: string;
+  priority?: string;
   parent?: string;
   tags?: string;
+  assignee?: string;
+  stage?: string;
+  /** Include deleted items in search results when present */
+  deleted?: boolean;
+  /** 'true'|'false'|'yes'|'no' (string form from CLI); parsed to boolean by command */
+  needsProducerReview?: string | boolean;
+  issueType?: string;
   limit?: string;
   rebuildIndex?: boolean;
   prefix?: string;

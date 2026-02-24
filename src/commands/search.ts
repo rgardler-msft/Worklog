@@ -15,8 +15,14 @@ export default function register(ctx: PluginContext): void {
     .description('Full-text search over work items (title, description, comments, tags)')
     .argument('[query]', 'Search query (supports phrases, prefix*, AND, OR, NOT)')
     .option('-s, --status <status>', 'Filter results by status')
+    .option('-p, --priority <priority>', 'Filter by priority')
     .option('--parent <id>', 'Filter results by parent work item id')
     .option('--tags <tags>', 'Filter results by tags (comma-separated)')
+    .option('-a, --assignee <assignee>', 'Filter by assignee')
+    .option('--stage <stage>', 'Filter by stage')
+    .option('--deleted', 'Include deleted items in results')
+    .option('--needs-producer-review [value]', 'Filter by needsProducerReview flag (true|false|yes|no; default true when omitted)')
+    .option('--issue-type <type>', 'Filter by issue type')
     .option('-l, --limit <n>', 'Maximum number of results (default: 20)')
     .option('--rebuild-index', 'Rebuild the FTS index from scratch before searching')
     .option('--prefix <prefix>', 'Override the default prefix')
@@ -67,12 +73,36 @@ export default function register(ctx: PluginContext): void {
         parentId = utils.normalizeCliId(parentId, options.prefix) || parentId;
       }
 
+      // Parse --needs-producer-review boolean flag (matching list.ts logic)
+      let needsProducerReview: boolean | undefined;
+      if (options.needsProducerReview !== undefined) {
+        if (options.needsProducerReview === true) {
+          needsProducerReview = true;
+        } else {
+          const raw = String(options.needsProducerReview).toLowerCase();
+          const truthy = ['true', 'yes', '1', ''];
+          const falsy = ['false', 'no', '0'];
+          if (truthy.includes(raw)) needsProducerReview = true;
+          else if (falsy.includes(raw)) needsProducerReview = false;
+          else {
+            output.error(`Invalid value for --needs-producer-review: ${options.needsProducerReview}`, { success: false, error: 'invalid-arg' });
+            process.exit(1);
+          }
+        }
+      }
+
       // Execute search
       const { results, ftsUsed } = db.search(query, {
         status: options.status,
         parentId,
         tags,
         limit: isNaN(limit) || limit < 1 ? 20 : limit,
+        priority: options.priority,
+        assignee: options.assignee,
+        stage: options.stage,
+        deleted: options.deleted,
+        needsProducerReview,
+        issueType: options.issueType,
       });
 
       if (utils.isJsonMode()) {

@@ -834,6 +834,12 @@ export class SqlitePersistentStore {
       parentId?: string;
       tags?: string[];
       limit?: number;
+      priority?: string;
+      assignee?: string;
+      stage?: string;
+      deleted?: boolean;
+      needsProducerReview?: boolean;
+      issueType?: string;
     }
   ): FtsSearchResult[] {
     if (!this._ftsAvailable) return [];
@@ -946,6 +952,12 @@ export class SqlitePersistentStore {
       parentId?: string;
       tags?: string[];
       limit?: number;
+      priority?: string;
+      assignee?: string;
+      stage?: string;
+      deleted?: boolean;
+      needsProducerReview?: boolean;
+      issueType?: string;
     }
   ): FtsSearchResult[] {
     const trimmed = query.trim().toLowerCase();

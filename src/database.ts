@@ -306,6 +306,12 @@ export class WorklogDatabase {
       parentId?: string;
       tags?: string[];
       limit?: number;
+      priority?: string;
+      assignee?: string;
+      stage?: string;
+      deleted?: boolean;
+      needsProducerReview?: boolean;
+      issueType?: string;
     }
   ): { results: FtsSearchResult[]; ftsUsed: boolean } {
     if (this.store.ftsAvailable) {
@@ -837,7 +843,8 @@ export class WorklogDatabase {
     recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore',
     excluded?: Set<string>,
     debugPrefix: string = '[next]',
-    includeInReview: boolean = false
+    includeInReview: boolean = false,
+    includeBlocked: boolean = false
   ): NextWorkItemResult {
     this.debug(`${debugPrefix} recencyPolicy=${recencyPolicy} assignee=${assignee || ''} search=${searchTerm || ''} excluded=${excluded?.size || 0}`);
     let filteredItems = items;
@@ -851,6 +858,13 @@ export class WorklogDatabase {
       filteredItems = filteredItems.filter(
         item => !(item.stage === 'in_review' && item.status === 'blocked')
       );
+    }
+
+    // Exclude items that have active dependency blockers unless explicitly requested.
+    // The user's preference selected 'Dependencies-only' for defining blocked items,
+    // so only dependency-based blockers are considered here.
+    if (!includeBlocked) {
+      filteredItems = filteredItems.filter(item => !this.hasActiveBlockers(item.id));
     }
     if (excluded && excluded.size > 0) {
       filteredItems = filteredItems.filter(item => !excluded.has(item.id));

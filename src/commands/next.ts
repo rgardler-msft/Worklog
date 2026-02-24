@@ -20,6 +20,7 @@ export default function register(ctx: PluginContext): void {
     .option('--recency-policy <policy>', 'Recency policy: prefer|avoid|ignore (default: ignore)', 'ignore')
     .option('--prefix <prefix>', 'Override the default prefix')
     .option('--include-in-review', 'Include items with status blocked and stage in_review (default: excluded)')
+    .option('--include-blocked', 'Include items that have active dependency blockers (default: excluded)')
     .action(async (...rawArgs: any[]) => {
       // Normalize incoming args: commander may pass a Command instance
       const normalized = normalizeActionArgs(rawArgs, ['assignee', 'search', 'number', 'recencyPolicy', 'prefix', 'includeInReview']);
@@ -33,10 +34,11 @@ export default function register(ctx: PluginContext): void {
 
       // `findNextWorkItems` and `findNextWorkItem` gained an optional recencyPolicy
       const includeInReview = Boolean(options.includeInReview);
+      const includeBlocked = Boolean(options.includeBlocked);
 
       const results = (db as any).findNextWorkItems 
-        ? (db as any).findNextWorkItems(count, options.assignee, options.search, recencyPolicy, includeInReview) 
-        : [db.findNextWorkItem(options.assignee, options.search, recencyPolicy, includeInReview)];
+        ? (db as any).findNextWorkItems(count, options.assignee, options.search, recencyPolicy, includeInReview, includeBlocked) 
+        : [db.findNextWorkItem(options.assignee, options.search, recencyPolicy, includeInReview, includeBlocked)];
 
       const availableResults = results.filter((result: any) => Boolean(result.workItem));
       const missingCount = Math.max(0, count - availableResults.length);
