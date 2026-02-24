@@ -72,6 +72,8 @@ export const DEFAULT_SHORTCUTS = [
       { keys: 'A', description: 'Show open items' },
       { keys: 'B', description: 'Show blocked only' },
       { keys: 'V', description: 'Needs review filter (cycle)' },
+      { keys: 'T', description: 'Show intake_completed items' },
+      { keys: 'P', description: 'Show plan_complete items' },
     ],
   },
   {
@@ -146,6 +148,8 @@ export const KEY_FILTER_IN_PROGRESS = ['i', 'I'];
 export const KEY_FILTER_OPEN = ['a', 'A'];
 export const KEY_FILTER_BLOCKED = ['b', 'B'];
 export const KEY_FILTER_NEEDS_REVIEW = ['v', 'V'];
+export const KEY_FILTER_INTAKE_COMPLETED = ['t', 'T'];
+export const KEY_FILTER_PLAN_COMPLETED = ['p', 'P'];
 export const KEY_TOGGLE_DO_NOT_DELEGATE = ['d', 'D'];
 export const KEY_TOGGLE_NEEDS_REVIEW = ['r', 'R'];
 export const KEY_MOVE = ['m', 'M'];

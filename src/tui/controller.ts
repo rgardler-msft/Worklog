@@ -36,7 +36,7 @@ import ChordHandler from './chords.js';
 import { stripAnsi, stripTags, decorateIdsForClick, extractIdFromLine, extractIdAtColumn, stripTagsAndAnsiWithMap, wrapPlainLineWithMap } from './id-utils.js';
 import { AVAILABLE_COMMANDS, MIN_INPUT_HEIGHT, MAX_INPUT_LINES, FOOTER_HEIGHT, OPENCODE_SERVER_PORT,
   KEY_NAV_RIGHT, KEY_NAV_LEFT, KEY_TOGGLE_EXPAND, KEY_QUIT, KEY_ESCAPE, KEY_TOGGLE_HELP, KEY_CHORD_PREFIX, KEY_CHORD_FOLLOWUPS, KEY_OPEN_OPENCODE, KEY_OPEN_SEARCH,
-  KEY_TAB, KEY_SHIFT_TAB, KEY_LEFT_SINGLE, KEY_RIGHT_SINGLE, KEY_CS, KEY_ENTER, KEY_LINEFEED, KEY_J, KEY_K, KEY_COPY_ID, KEY_PARENT_PREVIEW, KEY_CLOSE_ITEM, KEY_UPDATE_ITEM, KEY_REFRESH, KEY_FIND_NEXT, KEY_FILTER_IN_PROGRESS, KEY_FILTER_OPEN, KEY_FILTER_BLOCKED, KEY_FILTER_NEEDS_REVIEW, KEY_MENU_CLOSE, KEY_TOGGLE_DO_NOT_DELEGATE, KEY_TOGGLE_NEEDS_REVIEW, KEY_MOVE } from './constants.js';
+  KEY_TAB, KEY_SHIFT_TAB, KEY_LEFT_SINGLE, KEY_RIGHT_SINGLE, KEY_CS, KEY_ENTER, KEY_LINEFEED, KEY_J, KEY_K, KEY_COPY_ID, KEY_PARENT_PREVIEW, KEY_CLOSE_ITEM, KEY_UPDATE_ITEM, KEY_REFRESH, KEY_FIND_NEXT, KEY_FILTER_IN_PROGRESS, KEY_FILTER_OPEN, KEY_FILTER_BLOCKED, KEY_FILTER_NEEDS_REVIEW, KEY_FILTER_INTAKE_COMPLETED, KEY_FILTER_PLAN_COMPLETED, KEY_MENU_CLOSE, KEY_TOGGLE_DO_NOT_DELEGATE, KEY_TOGGLE_NEEDS_REVIEW, KEY_MOVE } from './constants.js';
 import { theme } from '../theme.js';
 import { initAutocomplete, type AutocompleteInstance } from './opencode-autocomplete.js';
 
@@ -2000,13 +2000,36 @@ export class TuiController {
       }
     };
 
-    function setFilterNext(filter: 'in-progress' | 'open' | 'blocked') {
+    function setFilterNext(filter: 'in-progress' | 'open' | 'blocked' | 'intake_completed' | 'plan_completed') {
       const status = filter === 'in-progress'
         ? 'in-progress'
         : filter === 'blocked'
           ? 'blocked'
           : undefined;
       const inProgress = filter === 'in-progress';
+
+      // Special-case stage-based filters
+      if (filter === 'intake_completed' || filter === 'plan_completed') {
+        const stage = filter === 'intake_completed' ? 'intake_complete' : 'plan_complete';
+        refreshListWithOptions({
+          status: undefined,
+          includeClosed: false,
+          updateOptions: { inProgress: false, all: false },
+          clearShowClosed: true,
+          allowFallback: false,
+        });
+        // After loading base items, post-filter by stage
+        // Use a small timeout to let refreshListWithOptions repopulate state.items
+        setTimeout(() => {
+          state.items = state.items.filter((item: any) => item.stage === stage && item.status !== 'completed' && item.status !== 'deleted');
+          state.showClosed = false;
+          rebuildTree();
+          expandInProgressAncestors();
+          renderListAndDetail(0);
+        }, 0);
+        return;
+      }
+
       refreshListWithOptions({
         status,
         includeClosed: false,
@@ -3061,10 +3084,20 @@ export class TuiController {
        setFilterNext('open');
      });
 
-     screen.key(KEY_FILTER_BLOCKED, () => {
-       if (state.moveMode) return;
-       setFilterNext('blocked');
-     });
+      screen.key(KEY_FILTER_BLOCKED, () => {
+        if (state.moveMode) return;
+        setFilterNext('blocked');
+      });
+
+      screen.key(KEY_FILTER_INTAKE_COMPLETED, () => {
+        if (state.moveMode) return;
+        setFilterNext('intake_completed');
+      });
+
+      screen.key(KEY_FILTER_PLAN_COMPLETED, () => {
+        if (state.moveMode) return;
+        setFilterNext('plan_completed');
+      });
 
      screen.key(KEY_FILTER_NEEDS_REVIEW, () => {
        if (state.moveMode) return;
