@@ -865,7 +865,18 @@ export class WorklogDatabase {
     // Save pre-dep-blocker pool so the critical-path can still surface blockers
     const preDepBlockerItems = filteredItems;
     if (!includeBlocked) {
-      filteredItems = filteredItems.filter(item => !this.hasActiveBlockers(item.id));
+      // Use store-direct access to avoid per-item refreshFromJsonlIfNewer overhead
+      // (data is already fresh from the getAllWorkItems call at the top of the stack)
+      filteredItems = filteredItems.filter(item => {
+        const edges = this.store.getDependencyEdgesFrom(item.id);
+        for (const edge of edges) {
+          const target = this.store.getWorkItem(edge.toId);
+          if (this.isDependencyActive(target ?? null)) {
+            return false;
+          }
+        }
+        return true;
+      });
     }
     this.debug(`${debugPrefix} after deleted/excluded/dep-blocker=${filteredItems.length}`);
 
