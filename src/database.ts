@@ -843,7 +843,8 @@ export class WorklogDatabase {
     recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore',
     excluded?: Set<string>,
     debugPrefix: string = '[next]',
-    includeInReview: boolean = false
+    includeInReview: boolean = false,
+    includeBlocked: boolean = false
   ): NextWorkItemResult {
     this.debug(`${debugPrefix} recencyPolicy=${recencyPolicy} assignee=${assignee || ''} search=${searchTerm || ''} excluded=${excluded?.size || 0}`);
     let filteredItems = items;
@@ -861,13 +862,20 @@ export class WorklogDatabase {
     if (excluded && excluded.size > 0) {
       filteredItems = filteredItems.filter(item => !excluded.has(item.id));
     }
-    this.debug(`${debugPrefix} after deleted/excluded=${filteredItems.length}`);
+    // Save pre-dep-blocker pool so the critical-path can still surface blockers
+    const preDepBlockerItems = filteredItems;
+    if (!includeBlocked) {
+      filteredItems = filteredItems.filter(item => !this.hasActiveBlockers(item.id));
+    }
+    this.debug(`${debugPrefix} after deleted/excluded/dep-blocker=${filteredItems.length}`);
 
     // Apply filters
     filteredItems = this.applyFilters(filteredItems, assignee, searchTerm);
     this.debug(`${debugPrefix} after assignee/search filters=${filteredItems.length}`);
 
-    const criticalItems = filteredItems.filter(
+    // Critical items: use pre-dep-blocker pool so that blocked criticals still surface their blockers
+    const criticalPool = this.applyFilters(preDepBlockerItems, assignee, searchTerm);
+    const criticalItems = criticalPool.filter(
       item => item.priority === 'critical' && item.status !== 'completed' && item.status !== 'deleted'
     );
     this.debug(`${debugPrefix} critical items=${criticalItems.length}`);
@@ -929,8 +937,10 @@ export class WorklogDatabase {
       };
     }
 
-    // Find in-progress and blocked items
-    const inProgressItems = filteredItems.filter(item => {
+    // Find in-progress and blocked items (use pre-dep-blocker pool so blocked items
+    // with dependency edges are still visible for blocker-surfacing logic)
+    const inProgressPool = this.applyFilters(preDepBlockerItems, assignee, searchTerm);
+    const inProgressItems = inProgressPool.filter(item => {
       const normalizedStatus = item.status.replace(/_/g, '-');
       return normalizedStatus === 'in-progress' || normalizedStatus === 'blocked';
     });
@@ -1108,10 +1118,11 @@ export class WorklogDatabase {
     assignee?: string,
     searchTerm?: string,
     recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore',
-    includeInReview: boolean = false
+    includeInReview: boolean = false,
+    includeBlocked: boolean = false
   ): NextWorkItemResult {
     const items = this.store.getAllWorkItems();
-    return this.findNextWorkItemFromItems(items, assignee, searchTerm, recencyPolicy, undefined, '[next]', includeInReview);
+    return this.findNextWorkItemFromItems(items, assignee, searchTerm, recencyPolicy, undefined, '[next]', includeInReview, includeBlocked);
   }
 
   /**
@@ -1123,7 +1134,8 @@ export class WorklogDatabase {
     assignee?: string,
     searchTerm?: string,
     recencyPolicy: 'prefer'|'avoid'|'ignore' = 'ignore',
-    includeInReview: boolean = false
+    includeInReview: boolean = false,
+    includeBlocked: boolean = false
   ): NextWorkItemResult[] {
     const results: NextWorkItemResult[] = [];
     const excluded = new Set<string>();
@@ -1136,7 +1148,8 @@ export class WorklogDatabase {
         recencyPolicy,
         excluded,
         `[next batch ${i + 1}/${count}]`,
-        includeInReview
+        includeInReview,
+        includeBlocked
       );
 
       results.push(result);
