@@ -73,7 +73,10 @@ export default function register(ctx: PluginContext): void {
       // By default hide completed items for human-readable output only.
       // When JSON mode is requested return all matching items so callers
       // can decide how to handle completed items programmatically.
-      if (!options.status && !utils.isJsonMode()) {
+      // When an explicit --stage filter is provided, skip this exclusion so
+      // that stages commonly associated with completed status (e.g.
+      // "in_review", "done") are not silently dropped from human output.
+      if (!options.status && !options.stage && !utils.isJsonMode()) {
         items = items.filter(item => item.status !== 'completed');
       }
 

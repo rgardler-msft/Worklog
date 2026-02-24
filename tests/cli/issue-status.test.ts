@@ -129,6 +129,36 @@ describe('CLI Issue Status Tests', () => {
       result.workItems.forEach((item: any) => expect(item.needsProducerReview).not.toBe(true));
     });
 
+    it('should include completed items when --stage filter matches them', async () => {
+      // Seed items where a completed item has a specific stage
+      seedWorkItems(tempState.tempDir, [
+        { title: 'Open Task', status: 'open', priority: 'high', stage: 'in_progress' },
+        { title: 'Completed Review Task', status: 'completed', priority: 'medium', stage: 'in_review' },
+        { title: 'Another Completed', status: 'completed', priority: 'low', stage: 'done' },
+      ]);
+
+      // JSON mode should return the completed item at stage in_review
+      const { stdout: jsonStdout } = await execAsync(`tsx ${cliPath} --json list --stage in_review`);
+      const jsonResult = JSON.parse(jsonStdout);
+      expect(jsonResult.success).toBe(true);
+      expect(jsonResult.workItems).toHaveLength(1);
+      expect(jsonResult.workItems[0].title).toBe('Completed Review Task');
+
+      // Human-readable mode should also return the same item (bug: previously excluded completed items)
+      const { stdout: humanStdout } = await execAsync(`tsx ${cliPath} list --stage in_review`);
+      expect(humanStdout).toContain('Completed Review Task');
+      expect(humanStdout).toContain('Found 1 work item');
+    });
+
+    it('should still hide completed items in human mode when no stage filter is set', async () => {
+      // The default behavior (no --stage, no --status) should still hide completed items in human mode
+      const { stdout: humanStdout } = await execAsync(`tsx ${cliPath} list`);
+      // Task 3 is completed and should be hidden
+      expect(humanStdout).not.toContain('Task 3');
+      expect(humanStdout).toContain('Task 1');
+      expect(humanStdout).toContain('Task 2');
+    });
+
     it('should error for invalid parent id', async () => {
       try {
         await execAsync(`tsx ${cliPath} --json list --parent TEST-NOTFOUND`);
