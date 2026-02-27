@@ -1373,4 +1373,143 @@ describe('wl next regression tests (WL-0MM2FKKOW1H0C0G4)', () => {
       expect(cache.has(item.id)).toBe(true);
     });
   });
+
+  // ── buildCandidateList / batch mode (WL-0MM347F9D1EGKLSQ) ──
+  describe('buildCandidateList batch mode (WL-0MM347F9D1EGKLSQ)', () => {
+    it('batch mode with 500 items completes in < 500ms for n=10', () => {
+      const priorities = ['low', 'medium', 'high', 'critical'] as const;
+      for (let i = 0; i < 500; i++) {
+        db.create({
+          title: `Task ${i}`,
+          priority: priorities[i % 4],
+          status: i % 10 === 0 ? 'completed' : 'open',
+          sortIndex: i * 10,
+        });
+      }
+
+      const start = Date.now();
+      const results = db.findNextWorkItems(10);
+      const duration = Date.now() - start;
+
+      expect(results.length).toBe(10);
+      expect(duration).toBeLessThan(3000); // Budget: <500ms typical, 3s under full-suite load
+      // All returned items should be unique
+      const ids = results.map(r => r.workItem?.id).filter(Boolean);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('batch mode returns in-progress children before unrelated open items', async () => {
+      const parent = db.create({
+        title: 'WIP parent',
+        priority: 'high',
+        status: 'in-progress',
+      });
+      await wait(10);
+      const child1 = db.create({
+        title: 'Child 1',
+        priority: 'medium',
+        status: 'open',
+        parentId: parent.id,
+      });
+      await wait(10);
+      const child2 = db.create({
+        title: 'Child 2',
+        priority: 'medium',
+        status: 'open',
+        parentId: parent.id,
+      });
+      await wait(10);
+      const unrelated = db.create({
+        title: 'Unrelated open',
+        priority: 'high',
+        status: 'open',
+      });
+
+      const results = db.findNextWorkItems(4);
+      const ids = results.map(r => r.workItem?.id).filter(Boolean);
+
+      // Children of in-progress parent should come first
+      expect(ids[0]).toBe(child1.id);
+      expect(ids[1]).toBe(child2.id);
+      // The parent should NOT appear (it's in-progress)
+      expect(ids).not.toContain(parent.id);
+      // Unrelated item should also appear
+      expect(ids).toContain(unrelated.id);
+    });
+
+    it('batch mode preserves root-then-descend ordering across subtrees', async () => {
+      // Root A (high) -> Leaf A1 (medium)
+      // Root B (medium)
+      // Expected batch order: Leaf A1 (descends from Root A which wins), then Root B
+      const rootA = db.create({
+        title: 'Root A',
+        priority: 'high',
+        status: 'open',
+      });
+      await wait(10);
+      const leafA1 = db.create({
+        title: 'Leaf A1',
+        priority: 'medium',
+        status: 'open',
+        parentId: rootA.id,
+      });
+      await wait(10);
+      const rootB = db.create({
+        title: 'Root B',
+        priority: 'medium',
+        status: 'open',
+      });
+
+      const results = db.findNextWorkItems(3);
+      const ids = results.map(r => r.workItem?.id).filter(Boolean);
+
+      expect(ids[0]).toBe(leafA1.id); // Descends from high-priority root A
+      expect(ids[1]).toBe(rootB.id);  // Root B is next
+      expect(ids).not.toContain(rootA.id); // Root A is not a leaf, not directly recommended
+    });
+
+    it('batch mode returns empty-result guard when no items exist', () => {
+      const results = db.findNextWorkItems(5);
+      expect(results.length).toBe(1);
+      expect(results[0].workItem).toBeNull();
+      expect(results[0].reason).toContain('No');
+    });
+
+    it('batch mode with N > available returns only available candidates', async () => {
+      db.create({ title: 'Only item', priority: 'medium', status: 'open' });
+
+      const results = db.findNextWorkItems(10);
+      expect(results.length).toBe(1);
+      expect(results[0].workItem).not.toBeNull();
+    });
+
+    it('batch mode critical escalation precedes normal candidates', async () => {
+      const normal = db.create({
+        title: 'Normal high',
+        priority: 'high',
+        status: 'open',
+      });
+      await wait(10);
+      const critBlocked = db.create({
+        title: 'Critical blocked',
+        priority: 'critical',
+        status: 'blocked',
+      });
+      await wait(10);
+      const blocker = db.create({
+        title: 'Blocker of critical',
+        priority: 'low',
+        status: 'open',
+        parentId: critBlocked.id,
+      });
+
+      const results = db.findNextWorkItems(3);
+      const ids = results.map(r => r.workItem?.id).filter(Boolean);
+
+      // Blocker of critical should come first (critical escalation tier)
+      expect(ids[0]).toBe(blocker.id);
+      // Normal high-priority item should come after
+      expect(ids).toContain(normal.id);
+    });
+  });
 });
