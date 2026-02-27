@@ -209,22 +209,29 @@ wl show WL-ABC123 -c
 
 ### `next` [options]
 
-Suggest the next work item(s) to work on using priority/status heuristics. By default, items with active dependency blockers are excluded.
+Suggest the next work item(s) to work on. Non-actionable items (deleted, completed, in-review, in-progress, dependency-blocked) are excluded by default.
 
-#### Ranking precedence
+#### Selection pipeline
 
-When multiple candidate items exist, `wl next` ranks them using the following criteria (highest weight first):
+`wl next` builds an ordered candidate list through five stages:
 
-1. **Priority** — higher-priority items always rank above lower-priority items.
-2. **Blocks high-priority work** — among equal-priority candidates, an item that is a prerequisite for a `high` or `critical` downstream item is preferred. This ensures that unblocking high-value work takes precedence over unrelated tasks at the same priority.
-3. **Blocked penalty** — items with active dependency blockers are excluded by default (see `--include-blocked`).
-4. **Tie-breakers** — sort_index hierarchy position, then age (older items first) break remaining ties.
+1. **Filter** — Remove non-actionable items: deleted, completed, in-review (unless `--include-in-review`), in-progress, and dependency-blocked (unless `--include-blocked`). Apply assignee and search filters.
+2. **Critical escalation** — Unblocked critical items are selected first, ordered by sort_index. Blocked critical items surface their highest-priority blocker. An unblocked critical always wins over a blocker of a non-critical item. Critical escalation operates on the full item set so blockers outside the filtered set (e.g. assigned to a different user) can still be surfaced.
+3. **Blocker surfacing** — For non-critical blocked items in the candidate pool, surface their direct blockers (children or dependency edges) if those blockers are actionable.
+4. **In-progress parent descent** — In-progress items are excluded from the candidate pool, but their direct children are recommended as next steps. Children are ordered by sort_index with effective priority tiebreaker.
+5. **Normal candidate ordering (root-then-descend)** — Remaining candidates are ordered by hierarchical sort_index position (depth-first traversal). Root-level candidates are sorted first, then each root's subtree is descended to find the leaf candidate. This preserves the semantic that root-level priority competition determines which subtree's leaf wins.
 
-Items with `status: 'blocked'` that have `critical` priority trigger a special escalation path: their direct blockers are surfaced immediately, bypassing the general ranking logic.
+#### Effective priority
 
-#### Backward compatibility
+Each candidate's **effective priority** is the maximum of its own priority and the priority of any active (non-completed, non-deleted) item it blocks. This means a medium-priority task that blocks a critical item is treated as critical-priority for ranking purposes. The effective priority is displayed in the selection reason (e.g. `"effective priority: critical, inherited from WL-xxx"`).
 
-The `--include-blocked` flag behavior is unchanged. The ranking boost only affects ordering among candidates that are already considered (i.e., unblocked items by default).
+#### Tie-breaking
+
+When sort_index values are equal, ties are broken by:
+
+1. **Effective priority** (descending) — higher effective priority wins.
+2. **Created date** (ascending) — older items win.
+3. **ID** (lexicographic) — deterministic final tiebreaker.
 
 Options:
 
