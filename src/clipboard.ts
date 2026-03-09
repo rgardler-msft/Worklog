@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import * as os from 'os';
 
 export type SpawnLike = (...args: any[]) => any;
 
@@ -86,7 +87,25 @@ export async function copyToClipboard(
       }
     }
 
-    // ----- 2. OSC 52 --------------------------------------------------------
+    // ----- 2. WSL / OSC 52 -------------------------------------------------
+    // Special-case: when running inside WSL, try the Windows clipboard helper
+    // (`clip.exe`) via interop. This helps common setups where tmux runs in
+    // WSL but the user expects the Windows clipboard to be updated.
+    const isWSL = typeof env.WSL_DISTRO_NAME === 'string' || typeof env.WSL_INTEROP === 'string' || /microsoft/i.test(os.release());
+    if (isWSL) {
+      try {
+        const clipRes = await run('clip.exe', []);
+        if (clipRes.code === 0) {
+          anySuccess = true;
+        } else if (clipRes.error) {
+          errors.push(clipRes.error.message);
+        }
+      } catch (e: any) {
+        errors.push(e?.message || 'clip.exe failed');
+      }
+    }
+
+    // ----- 3. OSC 52 --------------------------------------------------------
     // Write an OSC 52 escape sequence. If the terminal (or tmux with
     // set-clipboard on) supports it, this also sets the system clipboard.
     if (opts?.writeOsc52) {
