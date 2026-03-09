@@ -2,6 +2,7 @@ name: Worklog
 
 on:
   pull_request:
+  workflow_dispatch: {}
 
 concurrency:
   group: tui-tests-${{ github.event.pull_request.number || github.ref }}
