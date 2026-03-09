@@ -32,6 +32,8 @@ export interface DelegateResult {
 export interface DelegateOptions {
   /** Override the do-not-delegate tag guard rail. */
   force?: boolean;
+  /** Optional callback invoked at each major step of the delegate flow. */
+  onProgress?: (step: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +96,7 @@ export async function delegateWorkItem(
   _assignFn?: AssignFn,
 ): Promise<DelegateResult> {
   const warnings: string[] = [];
+  const progress = options.onProgress ?? (() => {});
 
   // ------------------------------------------------------------------
   // 1. Resolve work item
@@ -142,6 +145,7 @@ export async function delegateWorkItem(
   // 4. Push item to GitHub
   // ------------------------------------------------------------------
   try {
+    progress('Pushing to GitHub...');
     const upsert: UpsertFn =
       _upsertFn ??
       (await import('./github-sync.js')).upsertIssuesFromWorkItems;
@@ -176,6 +180,7 @@ export async function delegateWorkItem(
     // ----------------------------------------------------------------
     // 6. Assign @copilot
     // ----------------------------------------------------------------
+    progress('Assigning @copilot...');
     const assign: AssignFn =
       _assignFn ?? (await import('./github.js')).assignGithubIssueAsync;
 
@@ -220,6 +225,7 @@ export async function delegateWorkItem(
     // ----------------------------------------------------------------
     // 8. Assignment succeeded -- update local state and re-push labels
     // ----------------------------------------------------------------
+    progress('Updating local state...');
     db.update(itemId, {
       status: 'in-progress',
       assignee: '@github-copilot',

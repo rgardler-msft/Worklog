@@ -6,7 +6,8 @@
  * - No-op toast when no item is selected
  * - Guard rails: do-not-delegate tag blocks without Force
  * - Force override proceeds when item has do-not-delegate
- * - Delegate failure shows error toast, item state unchanged
+ * - Delegate failure shows error toast and error dialog
+ * - Status dialog shown with progress updates during delegation
  * - Non-delegated items preserved after delegation
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -89,7 +90,8 @@ describe('TUI g key delegate shortcut', () => {
     expect(mockDelegateWorkItem).toHaveBeenCalledTimes(1);
     const args = mockDelegateWorkItem.mock.calls[0] as any[];
     expect(args[2]).toBe(id);
-    expect(args[3]).toEqual({ force: false });
+    expect(args[3]).toEqual(expect.objectContaining({ force: false }));
+    expect(typeof args[3].onProgress).toBe('function');
   });
 
   it('shows success toast with issue URL after delegation', async () => {
@@ -104,7 +106,7 @@ describe('TUI g key delegate shortcut', () => {
     expect(ctx.toast.lastMessage()).toContain('https://github.com/test-owner/test-repo/issues/42');
   });
 
-  it('shows failure toast when delegate returns error', async () => {
+  it('shows failure toast and error dialog when delegate returns error', async () => {
     mockDelegateWorkItem.mockResolvedValue({
       success: false,
       workItemId: 'WL-TEST-1',
@@ -112,14 +114,72 @@ describe('TUI g key delegate shortcut', () => {
     } as any);
 
     const ctx = createTuiTestContext();
+    // Track selectList calls to verify error dialog
+    const selectListCalls: any[] = [];
+    const layout = (ctx as any).createLayout();
+    const origSelectList = layout.modalDialogs.selectList;
+    layout.modalDialogs.selectList = async (opts: any) => {
+      selectListCalls.push(opts);
+      return origSelectList(opts);
+    };
+
     const controller = new TuiController(ctx as any, { blessed: ctx.blessed });
     ctx.utils.createSampleItem({ tags: [] });
     await controller.start({});
 
     await pressKey(ctx, 'g');
 
-    expect(ctx.toast.lastMessage()).toMatch(/Delegation failed/);
-    expect(ctx.toast.lastMessage()).toContain('do-not-delegate');
+    // Toast shows short failure message
+    expect(ctx.toast.lastMessage()).toBe('Delegation failed');
+    // Error dialog was opened with full error detail
+    // selectList is called twice: once for confirmation (returns 0), once for error dialog (returns 0 = OK)
+    const errorDialog = selectListCalls.find((c: any) => c.title === 'Delegation Failed');
+    expect(errorDialog).toBeDefined();
+    expect(errorDialog.message).toContain('do-not-delegate');
+  });
+
+  it('opens status dialog with progress during delegation', async () => {
+    const ctx = createTuiTestContext();
+    // Track messageBox calls
+    const messageBoxCalls: any[] = [];
+    const messageBoxUpdates: string[] = [];
+    const layout = (ctx as any).createLayout();
+    layout.modalDialogs.messageBox = (opts: any) => {
+      messageBoxCalls.push(opts);
+      return {
+        update: (msg: string) => { messageBoxUpdates.push(msg); },
+        close: () => {},
+      };
+    };
+
+    // Make delegateWorkItem call the onProgress callback
+    (mockDelegateWorkItem as any).mockImplementation(async (_db: any, _cfg: any, _id: any, opts: any) => {
+      if (opts?.onProgress) {
+        opts.onProgress('Pushing to GitHub...');
+        opts.onProgress('Assigning @copilot...');
+      }
+      return {
+        success: true,
+        workItemId: 'WL-TEST-1',
+        issueNumber: 42,
+        issueUrl: 'https://github.com/test-owner/test-repo/issues/42',
+        pushed: true,
+        assigned: true,
+      };
+    });
+
+    const controller = new TuiController(ctx as any, { blessed: ctx.blessed });
+    ctx.utils.createSampleItem({ tags: [] });
+    await controller.start({});
+
+    await pressKey(ctx, 'g');
+
+    // messageBox was opened for status
+    expect(messageBoxCalls.length).toBe(1);
+    expect(messageBoxCalls[0].title).toBe('Delegating to Copilot');
+    // Progress updates were sent
+    expect(messageBoxUpdates).toContain('Pushing to GitHub...');
+    expect(messageBoxUpdates).toContain('Assigning @copilot...');
   });
 
   it('cancels when selectList returns cancel index', async () => {
@@ -149,7 +209,7 @@ describe('TUI g key delegate shortcut', () => {
     expect(mockDelegateWorkItem).toHaveBeenCalledTimes(1);
     const args2 = mockDelegateWorkItem.mock.calls[0] as any[];
     expect(args2[2]).toBe(id);
-    expect(args2[3]).toEqual({ force: true });
+    expect(args2[3]).toEqual(expect.objectContaining({ force: true }));
   });
 
   it('cancels do-not-delegate item when Cancel is selected', async () => {
@@ -181,17 +241,31 @@ describe('TUI g key delegate shortcut', () => {
     expect(mockDelegateWorkItem).not.toHaveBeenCalled();
   });
 
-  it('shows error toast when resolveGithubConfig throws', async () => {
-    // Temporarily make delegateWorkItem throw to simulate config error
+  it('shows error dialog when delegateWorkItem throws', async () => {
+    // Make delegateWorkItem throw to simulate unexpected error
     mockDelegateWorkItem.mockRejectedValue(new Error('GitHub repo not configured'));
 
     const ctx = createTuiTestContext();
+    // Track selectList calls to verify error dialog
+    const selectListCalls: any[] = [];
+    const layout = (ctx as any).createLayout();
+    const origSelectList = layout.modalDialogs.selectList;
+    layout.modalDialogs.selectList = async (opts: any) => {
+      selectListCalls.push(opts);
+      return origSelectList(opts);
+    };
+
     const controller = new TuiController(ctx as any, { blessed: ctx.blessed });
     ctx.utils.createSampleItem({ tags: [] });
     await controller.start({});
 
     await pressKey(ctx, 'g');
 
-    expect(ctx.toast.lastMessage()).toMatch(/Delegation failed/);
+    // Toast shows short failure message
+    expect(ctx.toast.lastMessage()).toBe('Delegation failed');
+    // Error dialog was opened with full error detail
+    const errorDialog = selectListCalls.find((c: any) => c.title === 'Delegation Failed');
+    expect(errorDialog).toBeDefined();
+    expect(errorDialog.message).toContain('GitHub repo not configured');
   });
 });

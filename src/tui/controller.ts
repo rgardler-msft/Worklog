@@ -3023,7 +3023,11 @@ export class TuiController {
 
       const force = hasDoNotDelegate;
 
-      showToast('Delegating to GitHub Copilot...');
+      // Open a status dialog to show progress during delegation
+      const statusDialog = modalDialogs.messageBox({
+        title: 'Delegating to Copilot',
+        message: 'Preparing to delegate...',
+      });
 
       try {
         const githubConfig = resolveGithubConfig({});
@@ -3031,8 +3035,13 @@ export class TuiController {
           db as DelegateDb,
           githubConfig,
           item.id,
-          { force },
+          {
+            force,
+            onProgress: (step: string) => { statusDialog.update(step); },
+          },
         );
+
+        statusDialog.close();
 
         if (result.success) {
           // Refresh the list to show updated status/assignee
@@ -3058,10 +3067,28 @@ export class TuiController {
             }
           }
         } else {
-          showToast(`Delegation failed: ${result.error || 'unknown error'}`);
+          // Show error dialog with full detail
+          showToast('Delegation failed');
+          await modalDialogs.selectList({
+            title: 'Delegation Failed',
+            message: `{red-fg}${result.error || 'Unknown error'}{/red-fg}`,
+            items: ['OK'],
+            defaultIndex: 0,
+            cancelIndex: 0,
+            height: 10,
+          });
         }
       } catch (err: any) {
-        showToast(`Delegation failed: ${err?.message || 'unknown error'}`);
+        statusDialog.close();
+        showToast('Delegation failed');
+        await modalDialogs.selectList({
+          title: 'Delegation Failed',
+          message: `{red-fg}${err?.message || 'Unknown error'}{/red-fg}`,
+          items: ['OK'],
+          defaultIndex: 0,
+          cancelIndex: 0,
+          height: 10,
+        });
       }
     });
 
