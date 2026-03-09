@@ -124,8 +124,8 @@ describe('TUI g key delegate shortcut', () => {
 
   it('cancels when selectList returns cancel index', async () => {
     const ctx = createTuiTestContext();
-    // Override selectList to return last index (Cancel)
-    (ctx as any).createLayout().modalDialogs.selectList = async () => 2;
+    // Override selectList to return index 1 (Cancel) — choices are ['Delegate', 'Cancel']
+    (ctx as any).createLayout().modalDialogs.selectList = async () => 1;
     const controller = new TuiController(ctx as any, { blessed: ctx.blessed });
     ctx.utils.createSampleItem({ tags: [] });
     await controller.start({});
@@ -135,12 +135,13 @@ describe('TUI g key delegate shortcut', () => {
     expect(mockDelegateWorkItem).not.toHaveBeenCalled();
   });
 
-  it('passes force=true when Delegate (Force) is selected', async () => {
+  it('delegates with force=true when item has do-not-delegate tag', async () => {
     const ctx = createTuiTestContext();
-    // Override selectList to return index 1 (Delegate (Force)) — for items without do-not-delegate
-    (ctx as any).createLayout().modalDialogs.selectList = async () => 1;
+    // For do-not-delegate items, choices are
+    // ['Delegate (ignoring Do Not Delegate flag)', 'Cancel']
+    // selectList returns 0 by default which confirms delegation with force
     const controller = new TuiController(ctx as any, { blessed: ctx.blessed });
-    const id = ctx.utils.createSampleItem({ tags: [] });
+    const id = ctx.utils.createSampleItem({ tags: ['do-not-delegate'] });
     await controller.start({});
 
     await pressKey(ctx, 'g');
@@ -151,20 +152,17 @@ describe('TUI g key delegate shortcut', () => {
     expect(args2[3]).toEqual({ force: true });
   });
 
-  it('shows do-not-delegate warning and uses Force when item is tagged', async () => {
+  it('cancels do-not-delegate item when Cancel is selected', async () => {
     const ctx = createTuiTestContext();
-    // For do-not-delegate items, choices are ['Delegate (Force)', 'Cancel']
-    // selectList returns 0 by default which maps to 'Delegate (Force)'
+    // Override selectList to return index 1 (Cancel)
+    (ctx as any).createLayout().modalDialogs.selectList = async () => 1;
     const controller = new TuiController(ctx as any, { blessed: ctx.blessed });
-    const id = ctx.utils.createSampleItem({ tags: ['do-not-delegate'] });
+    ctx.utils.createSampleItem({ tags: ['do-not-delegate'] });
     await controller.start({});
 
     await pressKey(ctx, 'g');
 
-    expect(mockDelegateWorkItem).toHaveBeenCalledTimes(1);
-    const args3 = mockDelegateWorkItem.mock.calls[0] as any[];
-    expect(args3[2]).toBe(id);
-    expect(args3[3]).toEqual({ force: true });
+    expect(mockDelegateWorkItem).not.toHaveBeenCalled();
   });
 
   it('does not trigger during move mode', async () => {

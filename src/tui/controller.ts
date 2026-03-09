@@ -2998,15 +2998,15 @@ export class TuiController {
       // Build modal choices depending on do-not-delegate status
       const hasDoNotDelegate = Array.isArray(item.tags) && item.tags.includes('do-not-delegate');
       const choices = hasDoNotDelegate
-        ? ['Delegate (Force)', 'Cancel']
-        : ['Delegate', 'Delegate (Force)', 'Cancel'];
+        ? ['Delegate (ignoring Do Not Delegate flag)', 'Cancel']
+        : ['Delegate', 'Cancel'];
 
       const titleStr = item.title.length > 50
         ? item.title.slice(0, 47) + '...'
         : item.title;
 
       const message = hasDoNotDelegate
-        ? `{yellow-fg}⚠ Item has do-not-delegate tag.{/yellow-fg}\nForce is required to proceed.\n\n${titleStr}`
+        ? `{yellow-fg}⚠ Item has do-not-delegate tag.{/yellow-fg}\n\n${titleStr}`
         : `Delegate to GitHub Copilot?\n\n${titleStr}`;
 
       const cancelIndex = choices.length - 1;
@@ -3016,19 +3016,12 @@ export class TuiController {
         items: choices,
         defaultIndex: 0,
         cancelIndex,
-        height: hasDoNotDelegate ? 14 : 12,
+        height: hasDoNotDelegate ? 12 : 10,
       });
 
       if (choiceIdx === cancelIndex) return;
 
-      const selectedChoice = choices[choiceIdx];
-      const force = selectedChoice === 'Delegate (Force)';
-
-      // If item has do-not-delegate and user didn't choose force, block
-      if (hasDoNotDelegate && !force) {
-        showToast('Blocked: item has do-not-delegate tag');
-        return;
-      }
+      const force = hasDoNotDelegate;
 
       showToast('Delegating to GitHub Copilot...');
 
