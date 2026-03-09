@@ -106,6 +106,30 @@ describe('TUI g key delegate shortcut', () => {
     expect(ctx.toast.lastMessage()).toContain('https://github.com/test-owner/test-repo/issues/42');
   });
 
+  it('offers to open the issue in the browser after successful delegation', async () => {
+    const ctx = createTuiTestContext();
+    const selectListCalls: any[] = [];
+    const layout = (ctx as any).createLayout();
+    const origSelectList = layout.modalDialogs.selectList;
+    layout.modalDialogs.selectList = async (opts: any) => {
+      selectListCalls.push(opts);
+      // Return 1 (Close) for all dialogs to avoid triggering browser open
+      return opts.title === 'Delegation Successful' ? 1 : origSelectList(opts);
+    };
+
+    const controller = new TuiController(ctx as any, { blessed: ctx.blessed });
+    ctx.utils.createSampleItem({ tags: [] });
+    await controller.start({});
+
+    await pressKey(ctx, 'g');
+
+    // Verify the "Open in Browser" dialog was shown
+    const browserDialog = selectListCalls.find((c: any) => c.title === 'Delegation Successful');
+    expect(browserDialog).toBeDefined();
+    expect(browserDialog.items).toEqual(['Open in Browser', 'Close']);
+    expect(browserDialog.message).toContain('https://github.com/test-owner/test-repo/issues/42');
+  });
+
   it('shows failure toast and error dialog when delegate returns error', async () => {
     mockDelegateWorkItem.mockResolvedValue({
       success: false,

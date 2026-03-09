@@ -3049,21 +3049,31 @@ export class TuiController {
           const url = result.issueUrl || `Issue #${result.issueNumber || '?'}`;
           showToast(`Delegated: ${url}`);
 
-          // Optional browser-open gated by WL_OPEN_BROWSER env var
-          if (process.env.WL_OPEN_BROWSER === 'true' && result.issueUrl) {
-            try {
-              const { exec } = await import('child_process');
-              const platform = process.platform;
-              const cmd = platform === 'darwin'
-                ? `open "${result.issueUrl}"`
-                : platform === 'win32'
-                  ? `powershell.exe Start "${result.issueUrl}"`
-                  : `xdg-open "${result.issueUrl}"`;
-              exec(cmd, (err) => {
-                if (err) showToast('Could not open browser');
-              });
-            } catch {
-              showToast('Could not open browser');
+          // Offer to open the issue in the browser
+          if (result.issueUrl) {
+            const openIdx = await modalDialogs.selectList({
+              title: 'Delegation Successful',
+              message: `Delegated to GitHub Copilot.\n\n${url}`,
+              items: ['Open in Browser', 'Close'],
+              defaultIndex: 0,
+              cancelIndex: 1,
+              height: 10,
+            });
+            if (openIdx === 0) {
+              try {
+                const { exec } = await import('child_process');
+                const platform = process.platform;
+                const cmd = platform === 'darwin'
+                  ? `open "${result.issueUrl}"`
+                  : platform === 'win32'
+                    ? `powershell.exe Start "${result.issueUrl}"`
+                    : `xdg-open "${result.issueUrl}"`;
+                exec(cmd, (err) => {
+                  if (err) showToast('Could not open browser');
+                });
+              } catch {
+                showToast('Could not open browser');
+              }
             }
           }
         } else {
