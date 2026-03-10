@@ -427,6 +427,78 @@ export class ModalDialogsComponent {
     });
   }
 
+  // -- Non-interactive message box (status / progress) -----------------------
+
+  /**
+   * Show a non-interactive message box with dynamic content.
+   *
+   * Returns an imperative handle with `update(message)` and `close()` methods.
+   * The caller controls the lifecycle — the dialog stays open until `close()`
+   * is called.  Pressing Escape also closes the dialog.
+   *
+   * Useful for displaying multi-step progress (e.g., "Pushing to GitHub…"
+   * then "Assigning @copilot…").
+   */
+  messageBox(options: {
+    title: string;
+    message: string;
+    width?: string | number;
+    height?: string | number;
+  }): { update: (message: string) => void; close: () => void } {
+    const overlay = this.createOverlay();
+    const dialog = this.blessedImpl.box({
+      parent: this.screen,
+      top: 'center',
+      left: 'center',
+      width: options.width || '60%',
+      height: options.height || 7,
+      label: ` ${options.title} `,
+      border: { type: 'line' },
+      tags: true,
+      mouse: true,
+      clickable: true,
+      style: { border: { fg: 'cyan' } },
+    }) as BlessedBox;
+
+    const text = this.blessedImpl.box({
+      parent: dialog,
+      top: 1,
+      left: 2,
+      width: '100%-4',
+      height: '100%-3',
+      content: options.message,
+      tags: true,
+    }) as BlessedBox;
+
+    let closed = false;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      this.destroyWidgets([text, dialog, overlay]);
+      if (this.activeCleanup === cleanup) this.activeCleanup = null;
+    };
+    this.activeCleanup = cleanup;
+
+    dialog.key(KEY_ESCAPE, () => { cleanup(); });
+    overlay.on('click', () => { cleanup(); });
+
+    overlay.setFront();
+    dialog.setFront();
+    dialog.focus();
+    this.screen.render();
+
+    return {
+      update: (message: string) => {
+        if (closed) return;
+        try {
+          text.setContent(message);
+          this.screen.render();
+        } catch (_) {}
+      },
+      close: () => { cleanup(); },
+    };
+  }
+
   // -- Private helpers -------------------------------------------------------
 
   private createOverlay(): BlessedBox {

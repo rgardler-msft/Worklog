@@ -34,6 +34,8 @@ This document describes the interactive terminal UI shipped as the `wl tui` (or 
 - / — search items
 - v — cycle needs-producer-review filter (on/off/all)
 - h — toggle help menu
+- D — toggle do-not-delegate tag on selected item
+- **g — delegate selected item to GitHub Copilot** (opens confirmation modal with optional Force override; see `wl github delegate` for CLI equivalent)
 - **m — move/reparent item** (see below)
 
 ### Move / Reparent Mode

@@ -36,9 +36,11 @@ import ChordHandler from './chords.js';
 import { stripAnsi, stripTags, decorateIdsForClick, extractIdFromLine, extractIdAtColumn, stripTagsAndAnsiWithMap, wrapPlainLineWithMap } from './id-utils.js';
 import { AVAILABLE_COMMANDS, MIN_INPUT_HEIGHT, MAX_INPUT_LINES, FOOTER_HEIGHT, OPENCODE_SERVER_PORT,
   KEY_NAV_RIGHT, KEY_NAV_LEFT, KEY_TOGGLE_EXPAND, KEY_QUIT, KEY_ESCAPE, KEY_TOGGLE_HELP, KEY_CHORD_PREFIX, KEY_CHORD_FOLLOWUPS, KEY_OPEN_OPENCODE, KEY_OPEN_SEARCH,
-  KEY_TAB, KEY_SHIFT_TAB, KEY_LEFT_SINGLE, KEY_RIGHT_SINGLE, KEY_CS, KEY_ENTER, KEY_LINEFEED, KEY_J, KEY_K, KEY_COPY_ID, KEY_PARENT_PREVIEW, KEY_CLOSE_ITEM, KEY_UPDATE_ITEM, KEY_REFRESH, KEY_FIND_NEXT, KEY_FILTER_IN_PROGRESS, KEY_FILTER_OPEN, KEY_FILTER_BLOCKED, KEY_FILTER_NEEDS_REVIEW, KEY_FILTER_INTAKE_COMPLETED, KEY_FILTER_PLAN_COMPLETED, KEY_MENU_CLOSE, KEY_TOGGLE_DO_NOT_DELEGATE, KEY_TOGGLE_NEEDS_REVIEW, KEY_MOVE } from './constants.js';
+  KEY_TAB, KEY_SHIFT_TAB, KEY_LEFT_SINGLE, KEY_RIGHT_SINGLE, KEY_CS, KEY_ENTER, KEY_LINEFEED, KEY_J, KEY_K, KEY_COPY_ID, KEY_PARENT_PREVIEW, KEY_CLOSE_ITEM, KEY_UPDATE_ITEM, KEY_REFRESH, KEY_FIND_NEXT, KEY_FILTER_IN_PROGRESS, KEY_FILTER_OPEN, KEY_FILTER_BLOCKED, KEY_FILTER_NEEDS_REVIEW, KEY_FILTER_INTAKE_COMPLETED, KEY_FILTER_PLAN_COMPLETED, KEY_MENU_CLOSE, KEY_TOGGLE_DO_NOT_DELEGATE, KEY_TOGGLE_NEEDS_REVIEW, KEY_MOVE, KEY_DELEGATE } from './constants.js';
 import { theme } from '../theme.js';
 import { initAutocomplete, type AutocompleteInstance } from './opencode-autocomplete.js';
+import { delegateWorkItem, type DelegateResult, type DelegateDb } from '../delegate-helper.js';
+import { resolveGithubConfig } from '../commands/github.js';
 
 type Item = WorkItem;
 
@@ -2977,6 +2979,126 @@ export class TuiController {
         refreshFromDatabase(list.selected as number);
       } catch (err) {
         showToast('Update failed');
+      }
+    });
+
+    // Delegate to GitHub Copilot (shortcut g)
+    screen.key(KEY_DELEGATE, async () => {
+      // Guard: suppress when overlays are visible or in move mode
+      if (!detailModal.hidden || helpMenu.isVisible() || !closeDialog.hidden || !updateDialog.hidden || !nextDialog.hidden) return;
+      if (!opencodeDialog.hidden) return;
+      if (state.moveMode) return;
+
+      const item = getSelectedItem();
+      if (!item) {
+        showToast('No item selected');
+        return;
+      }
+
+      // Build modal choices depending on do-not-delegate status
+      const hasDoNotDelegate = Array.isArray(item.tags) && item.tags.includes('do-not-delegate');
+      const choices = hasDoNotDelegate
+        ? ['Delegate (ignoring Do Not Delegate flag)', 'Cancel']
+        : ['Delegate', 'Cancel'];
+
+      const titleStr = item.title.length > 50
+        ? item.title.slice(0, 47) + '...'
+        : item.title;
+
+      const message = hasDoNotDelegate
+        ? `{yellow-fg}⚠ Item has do-not-delegate tag.{/yellow-fg}\n\n${titleStr}`
+        : `Delegate to GitHub Copilot?\n\n${titleStr}`;
+
+      const cancelIndex = choices.length - 1;
+      const choiceIdx = await modalDialogs.selectList({
+        title: 'Delegate to Copilot',
+        message,
+        items: choices,
+        defaultIndex: 0,
+        cancelIndex,
+        height: hasDoNotDelegate ? 12 : 10,
+      });
+
+      if (choiceIdx === cancelIndex) return;
+
+      const force = hasDoNotDelegate;
+
+      // Open a status dialog to show progress during delegation
+      const statusDialog = modalDialogs.messageBox({
+        title: 'Delegating to Copilot',
+        message: 'Preparing to delegate...',
+      });
+
+      try {
+        const githubConfig = resolveGithubConfig({});
+        const result: DelegateResult = await delegateWorkItem(
+          db as DelegateDb,
+          githubConfig,
+          item.id,
+          {
+            force,
+            onProgress: (step: string) => { statusDialog.update(step); },
+          },
+        );
+
+        statusDialog.close();
+
+        if (result.success) {
+          // Refresh the list to show updated status/assignee
+          refreshFromDatabase(list.selected as number);
+          const url = result.issueUrl || `Issue #${result.issueNumber || '?'}`;
+          showToast(`Delegated: ${url}`);
+
+          // Offer to open the issue in the browser
+          if (result.issueUrl) {
+            const openIdx = await modalDialogs.selectList({
+              title: 'Delegation Successful',
+              message: `Delegated to GitHub Copilot.\n\n${url}`,
+              items: ['Open in Browser', 'Close'],
+              defaultIndex: 0,
+              cancelIndex: 1,
+              height: 10,
+            });
+            if (openIdx === 0) {
+              try {
+                const { exec } = await import('child_process');
+                const platform = process.platform;
+                const cmd = platform === 'darwin'
+                  ? `open "${result.issueUrl}"`
+                  : platform === 'win32'
+                    ? `powershell.exe Start "${result.issueUrl}"`
+                    : `xdg-open "${result.issueUrl}"`;
+                exec(cmd, (err) => {
+                  if (err) showToast('Could not open browser');
+                });
+              } catch {
+                showToast('Could not open browser');
+              }
+            }
+          }
+        } else {
+          // Show error dialog with full detail
+          showToast('Delegation failed');
+          await modalDialogs.selectList({
+            title: 'Delegation Failed',
+            message: `{red-fg}${result.error || 'Unknown error'}{/red-fg}`,
+            items: ['OK'],
+            defaultIndex: 0,
+            cancelIndex: 0,
+            height: 10,
+          });
+        }
+      } catch (err: any) {
+        statusDialog.close();
+        showToast('Delegation failed');
+        await modalDialogs.selectList({
+          title: 'Delegation Failed',
+          message: `{red-fg}${err?.message || 'Unknown error'}{/red-fg}`,
+          items: ['OK'],
+          defaultIndex: 0,
+          cancelIndex: 0,
+          height: 10,
+        });
       }
     });
 

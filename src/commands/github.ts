@@ -8,8 +8,9 @@ import { upsertIssuesFromWorkItems, importIssuesToWorkItems, GithubProgress, Syn
 import { loadConfig } from '../config.js';
 import { displayConflictDetails } from './helpers.js';
 import { createLogFileWriter, getWorklogLogPath, logConflictDetails } from '../logging.js';
+import { delegateWorkItem, type DelegateResult } from '../delegate-helper.js';
 
-function resolveGithubConfig(options: { repo?: string; labelPrefix?: string }) {
+export function resolveGithubConfig(options: { repo?: string; labelPrefix?: string }) {
   const config = loadConfig();
   const repo = options.repo || config?.githubRepo || getRepoFromGitRemote();
   if (!repo) {
@@ -457,30 +458,15 @@ export default function register(ctx: PluginContext): void {
         process.exit(1);
       }
 
-      // Guard rail: do-not-delegate tag
-      if (Array.isArray(item.tags) && item.tags.includes('do-not-delegate')) {
-        if (!options.force) {
-          const message = `Work item ${normalizedId} has a "do-not-delegate" tag. Use --force to override.`;
-          output.error(message, {
-            success: false,
-            error: 'do-not-delegate',
-            workItemId: normalizedId,
-          });
-          process.exit(1);
-        }
-        if (!isJsonMode) {
-          console.log(`Warning: Work item ${normalizedId} has a "do-not-delegate" tag. Proceeding due to --force.`);
-        }
-      }
-
-      // Guard rail: children warning
+      // CLI-specific guard rail: interactive children prompt
+      // (The helper handles children as a non-blocking warning, but the CLI
+      //  gives the user a chance to abort in interactive mode.)
       const children = db.getChildren(normalizedId);
       if (children.length > 0) {
         const nonClosedChildren = children.filter(
           c => c.status !== 'completed' && c.status !== 'deleted'
         );
         if (nonClosedChildren.length > 0) {
-          // In non-interactive mode (JSON or non-TTY), proceed with single item only
           const isInteractive = !isJsonMode && process.stdout.isTTY === true && process.stdin.isTTY === true;
           if (isInteractive) {
             const readline = await import('node:readline');
@@ -499,112 +485,21 @@ export default function register(ctx: PluginContext): void {
               }
               process.exit(0);
             }
-          } else {
-            // Non-interactive: proceed with single item, log warning
-            if (!isJsonMode) {
-              console.log(
-                `Warning: Work item ${normalizedId} has ${nonClosedChildren.length} open child item(s). ` +
-                `Delegating only the specified item.`
-              );
-            }
           }
         }
       }
 
-      // Guard rails passed — delegate flow placeholder
-      // The actual push + assign + local state update is wired in WL-0MM8LXODU1DA2PON
+      // Resolve GitHub config and delegate via shared helper
+      let result: DelegateResult;
       try {
         const githubConfig = resolveGithubConfig({ repo: (options as any).repo, labelPrefix: (options as any).labelPrefix });
 
-        // Push the work item to GitHub (smart sync)
-        const comments = db.getAllComments();
-        const { updatedItems } = await upsertIssuesFromWorkItems(
-          [item],
-          comments.filter(c => c.workItemId === item.id),
+        result = await delegateWorkItem(
+          db,
           githubConfig,
-          () => {} // no progress rendering for single-item push
+          normalizedId,
+          { force: options.force },
         );
-        if (updatedItems.length > 0) {
-          db.upsertItems(updatedItems);
-        }
-
-        // Resolve the GitHub issue number (may have been set by the push)
-        const refreshedItem = db.get(normalizedId);
-        const issueNumber = refreshedItem?.githubIssueNumber ?? item.githubIssueNumber;
-        if (!issueNumber) {
-          const message = `Failed to resolve GitHub issue number for ${normalizedId} after push.`;
-          output.error(message, {
-            success: false,
-            error: message,
-            workItemId: normalizedId,
-          });
-          process.exit(1);
-        }
-
-        // Assign the issue to copilot
-        const { assignGithubIssueAsync } = await import('../github.js');
-        const assignResult = await assignGithubIssueAsync(githubConfig, issueNumber, '@copilot');
-
-        if (!assignResult.ok) {
-          // Assignment failed: do NOT update local state, add comment, re-push
-          const failureMessage = `Failed to assign @copilot to GitHub issue #${issueNumber}: ${assignResult.error}. Local state was not updated.`;
-          db.createComment({
-            workItemId: normalizedId,
-            author: 'wl-delegate',
-            comment: failureMessage,
-          });
-          // Re-push to restore consistency after comment
-          const refreshedComments = db.getAllComments();
-          await upsertIssuesFromWorkItems(
-            [db.get(normalizedId)!],
-            refreshedComments.filter(c => c.workItemId === normalizedId),
-            githubConfig,
-            () => {}
-          );
-          output.error(failureMessage, {
-            success: false,
-            error: assignResult.error,
-            workItemId: normalizedId,
-            issueNumber,
-            issueUrl: `https://github.com/${githubConfig.repo}/issues/${issueNumber}`,
-            pushed: true,
-            assigned: false,
-          });
-          process.exit(1);
-        }
-
-        // Assignment succeeded: update local state
-        db.update(normalizedId, {
-          status: 'in-progress' as any,
-          assignee: '@github-copilot',
-          stage: 'in_progress',
-        });
-
-        // Re-push to sync updated status/stage labels to GitHub
-        const postAssignComments = db.getAllComments();
-        await upsertIssuesFromWorkItems(
-          [db.get(normalizedId)!],
-          postAssignComments.filter(c => c.workItemId === normalizedId),
-          githubConfig,
-          () => {}
-        );
-
-        const issueUrl = `https://github.com/${githubConfig.repo}/issues/${issueNumber}`;
-
-        if (isJsonMode) {
-          output.json({
-            success: true,
-            workItemId: normalizedId,
-            issueNumber,
-            issueUrl,
-            pushed: true,
-            assigned: true,
-          });
-        } else {
-          console.log(`Pushing to GitHub... done.`);
-          console.log(`Assigning to @copilot... done.`);
-          console.log(`Done. Issue: ${issueUrl}`);
-        }
       } catch (error) {
         const message = `Delegation failed: ${(error as Error).message}`;
         output.error(message, {
@@ -613,6 +508,68 @@ export default function register(ctx: PluginContext): void {
           workItemId: normalizedId,
         });
         process.exit(1);
+        return; // unreachable, but satisfies TS that result is assigned
+      }
+
+      // Print warnings (children, force-override) in non-JSON mode
+      if (!isJsonMode && result.warnings) {
+        for (const w of result.warnings) {
+          console.log(`Warning: ${w}`);
+        }
+      }
+
+      if (!result.success) {
+        // Map helper error keys to CLI output
+        if (result.error === 'do-not-delegate') {
+          const message = `Work item ${normalizedId} has a "do-not-delegate" tag. Use --force to override.`;
+          output.error(message, {
+            success: false,
+            error: 'do-not-delegate',
+            workItemId: normalizedId,
+          });
+          process.exit(1);
+        }
+
+        // Assignment failure — helper already added comment and re-pushed
+        if (result.pushed && result.assigned === false && result.issueNumber) {
+          const failureMessage =
+            `Failed to assign @copilot to GitHub issue #${result.issueNumber}: ${result.error}. Local state was not updated.`;
+          output.error(failureMessage, {
+            success: false,
+            error: result.error,
+            workItemId: normalizedId,
+            issueNumber: result.issueNumber,
+            issueUrl: result.issueUrl,
+            pushed: true,
+            assigned: false,
+          });
+          process.exit(1);
+        }
+
+        // Generic failure (push error, issue number resolution, etc.)
+        const message = `Delegation failed: ${result.error}`;
+        output.error(message, {
+          success: false,
+          error: result.error,
+          workItemId: normalizedId,
+        });
+        process.exit(1);
+      }
+
+      // Success path
+      if (isJsonMode) {
+        output.json({
+          success: true,
+          workItemId: normalizedId,
+          issueNumber: result.issueNumber,
+          issueUrl: result.issueUrl,
+          pushed: true,
+          assigned: true,
+        });
+      } else {
+        console.log(`Pushing to GitHub... done.`);
+        console.log(`Assigning to @copilot... done.`);
+        console.log(`Done. Issue: ${result.issueUrl}`);
       }
     });
 }

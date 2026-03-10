@@ -432,6 +432,7 @@ Subcommands:
    - `--force` — **Deprecated** alias for `--all`. Bypass the pre-filter and process all work items regardless of whether they changed since the last push.
    - `--no-update-timestamp` — Do not write the repository last-push timestamp after a successful push. Use this when you want to run a push but avoid advancing the "last pushed" watermark.
 - `import` — Import updates from GitHub Issues. Options: `--repo <owner/name>`, `--label-prefix <prefix>`, `--since <ISO timestamp>`, `--create-new`, `--prefix <prefix>`.
+- `delegate <id>` — Delegate a work item to GitHub Copilot. Pushes the item to GitHub, assigns the resulting issue to `@copilot`, and updates local status/assignee. Options: `--repo <owner/name>`, `--label-prefix <prefix>`, `--force` (override the `do-not-delegate` tag). In the TUI, press **g** on a focused item for the same flow with a confirmation modal.
 
 Examples:
 

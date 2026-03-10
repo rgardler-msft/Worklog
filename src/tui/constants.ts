@@ -98,6 +98,7 @@ export const DEFAULT_SHORTCUTS = [
       { keys: 'U', description: 'Update selected item' },
       { keys: 'M', description: 'Move/reparent item' },
       { keys: 'D', description: 'Toggle do-not-delegate' },
+      { keys: 'g', description: 'Delegate to Copilot' },
       { keys: 'r/R', description: 'Toggle needs review' },
     ],
   },
@@ -153,6 +154,7 @@ export const KEY_FILTER_PLAN_COMPLETED = ['p', 'P'];
 export const KEY_TOGGLE_DO_NOT_DELEGATE = ['d', 'D'];
 export const KEY_TOGGLE_NEEDS_REVIEW = ['r', 'R'];
 export const KEY_MOVE = ['m', 'M'];
+export const KEY_DELEGATE = ['g'];
 
 // Composite keys often used in help menu / close handlers
 export const KEY_MENU_CLOSE = ['escape', 'q'];
