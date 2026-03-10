@@ -3060,38 +3060,13 @@ export class TuiController {
               height: 10,
             });
             if (openIdx === 0) {
-              try {
-                const { exec } = await import('child_process');
-                const platform = process.platform;
-                // Detect WSL and prefer launching via explorer.exe so the
-                // Windows default browser is used. Fall back to xdg-open on
-                // regular Linux environments.
-                let cmd: string;
-                if (platform === 'darwin') {
-                  cmd = `open "${result.issueUrl}"`;
-                } else if (platform === 'win32') {
-                  cmd = `powershell.exe Start "${result.issueUrl}"`;
-                } else {
-                  // linux or others
-                  let isWsl = false;
-                  try {
-                    if (process.env.WSL_DISTRO_NAME) isWsl = true;
-                    else {
-                      // Check /proc/version for 'Microsoft' marker
-                      const ver = fsImpl.readFileSync('/proc/version', 'utf8');
-                      if (/microsoft/i.test(ver)) isWsl = true;
-                    }
-                  } catch (_) {
-                    // ignore - assume not WSL
-                  }
-                  cmd = isWsl ? `explorer.exe "${result.issueUrl}"` : `xdg-open "${result.issueUrl}"`;
+                try {
+                  const openUrl = (await import('../utils/open-url.js')).default;
+                  const ok = await openUrl(result.issueUrl, fsImpl as any);
+                  if (!ok) showToast('Could not open browser');
+                } catch (e) {
+                  showToast('Could not open browser');
                 }
-                exec(cmd, (err) => {
-                  if (err) showToast('Could not open browser');
-                });
-              } catch {
-                showToast('Could not open browser');
-              }
             }
           }
         } else {
