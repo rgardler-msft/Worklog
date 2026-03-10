@@ -3060,20 +3060,13 @@ export class TuiController {
               height: 10,
             });
             if (openIdx === 0) {
-              try {
-                const { exec } = await import('child_process');
-                const platform = process.platform;
-                const cmd = platform === 'darwin'
-                  ? `open "${result.issueUrl}"`
-                  : platform === 'win32'
-                    ? `powershell.exe Start "${result.issueUrl}"`
-                    : `xdg-open "${result.issueUrl}"`;
-                exec(cmd, (err) => {
-                  if (err) showToast('Could not open browser');
-                });
-              } catch {
-                showToast('Could not open browser');
-              }
+                try {
+                  const openUrl = (await import('../utils/open-url.js')).default;
+                  const ok = await openUrl(result.issueUrl, fsImpl as any);
+                  if (!ok) showToast('Could not open browser');
+                } catch (e) {
+                  showToast('Could not open browser');
+                }
             }
           }
         } else {
