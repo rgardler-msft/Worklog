@@ -91,7 +91,10 @@ export async function copyToClipboard(
     // Special-case: when running inside WSL, try the Windows clipboard helper
     // (`clip.exe`) via interop. This helps common setups where tmux runs in
     // WSL but the user expects the Windows clipboard to be updated.
-    const isWSL = typeof env.WSL_DISTRO_NAME === 'string' || typeof env.WSL_INTEROP === 'string' || /microsoft/i.test(os.release());
+    // Detection is driven by environment variables set by WSL (WSL_DISTRO_NAME
+    // or WSL_INTEROP). Avoid relying on kernel-release text (os.release()) as
+    // it can produce false positives in some test/CI environments.
+    const isWSL = typeof env.WSL_DISTRO_NAME === 'string' || typeof env.WSL_INTEROP === 'string';
     if (isWSL) {
       try {
         const clipRes = await run('clip.exe', []);
